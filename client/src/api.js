@@ -62,6 +62,12 @@ export const api = {
     request("/api/today/entries/repeat-last", { method: "POST", body: { patientId } }),
   setPatientNote: (patientId, note) =>
     request(`/api/patients/${patientId}/note`, { method: "POST", body: { note } }),
+  renamePatient: (patientId, name) =>
+    request(`/api/patients/${patientId}/rename`, { method: "POST", body: { name } }),
+  setPatientArchived: (patientId, archived) =>
+    request(`/api/patients/${patientId}/archive`, { method: "POST", body: { archived } }),
+  deleteCondition: (patientId, conditionId) =>
+    request(`/api/patients/${patientId}/conditions/${conditionId}`, { method: "DELETE", body: {} }),
   addExisting: (patientId, conditionIds) => request("/api/today/entries", { method: "POST", body: { patientId, conditionIds } }),
   entry: (id) => request(withDevice(`/api/entries/${id}`)),
   addCondition: (id, name) => request(`/api/entries/${id}/conditions`, { method: "POST", body: { name } }),
@@ -77,4 +83,25 @@ export const api = {
   leave: (id, updateCondition) => request(`/api/entries/${id}/leave`, { method: "POST", body: { updateCondition } }),
   copyCondition: (conditionId, targetPatientId) =>
     request(`/api/conditions/${conditionId}/copy`, { method: "POST", body: { targetPatientId } }),
+  // 导出走 GET 附件下载；失败时接口返回 JSON 错误。
+  exportClinic: async () => {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+    let response
+    try {
+      response = await fetch(withDevice("/api/data/export"), { signal: controller.signal })
+    } catch {
+      throw new Error("网络不通，稍后再试")
+    } finally {
+      clearTimeout(timer)
+    }
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}))
+      const error = new Error(data.error || "导不出")
+      error.status = response.status
+      throw error
+    }
+    return response.json()
+  },
+  importClinic: (data) => request("/api/data/import", { method: "POST", body: { data } }),
 }

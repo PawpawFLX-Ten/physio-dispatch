@@ -50,6 +50,18 @@ app.post("/api/data/import", asyncRoute((req) => store.importData(req.body)))
 app.post("/api/patients", asyncRoute((req) => store.createPatient(req.body)))
 app.post("/api/patients/from-template", asyncRoute((req) => store.createPatientFromTemplate(req.body)))
 app.post("/api/patients/:id/note", asyncRoute((req) => store.setPatientNote({ ...req.body, patientId: req.params.id })))
+app.post("/api/patients/:id/rename", asyncRoute((req) => store.renamePatient({ ...req.body, patientId: req.params.id })))
+app.post("/api/patients/:id/archive", asyncRoute((req) => store.setPatientArchived({ ...req.body, patientId: req.params.id })))
+app.delete(
+  "/api/patients/:id/conditions/:conditionId",
+  asyncRoute((req) =>
+    store.deleteCondition({
+      deviceId: req.body.deviceId,
+      patientId: req.params.id,
+      conditionId: req.params.conditionId,
+    }),
+  ),
+)
 app.post("/api/templates", asyncRoute((req) => store.saveTemplateFromEntry(req.body)))
 app.delete("/api/templates/:id", asyncRoute((req) => store.deleteTemplate({ deviceId: req.body.deviceId, templateId: req.params.id })))
 app.post("/api/today/entries", asyncRoute((req) => store.addExisting(req.body)))

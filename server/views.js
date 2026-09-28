@@ -46,6 +46,7 @@ export const viewMethods = {
         return {
           id: patient.id,
           name: patient.name,
+          archived: Boolean(patient.archived),
           conditions: patient.conditions.map((condition) => ({
             id: condition.id,
             name: condition.name,
@@ -217,6 +218,7 @@ export const viewMethods = {
         id: entry.id,
         patientId: patient.id,
         patientName: patient.name,
+        archived: Boolean(patient.archived),
         note: patient.note || "",
         lastAssigneeId: lastAssignee?.id || null,
         lastAssigneeName: lastAssignee?.name || "",

@@ -150,6 +150,53 @@ export const entryMethods = {
     return this.view(deviceId)
   },
 
+  renamePatient({ deviceId, patientId, name }) {
+    this.requireStaff(deviceId)
+    const trimmed = String(name || "").trim()
+    if (!trimmed) fail(400, "请填写病人姓名")
+    const patient = this.patient(patientId)
+    const clash = this.state.patients.find((row) => row.id !== patientId && row.name === trimmed)
+    if (clash) fail(400, `已有叫${trimmed}的病人`)
+    const before = patient.name
+    patient.name = trimmed
+    this.save()
+    this.audit(deviceId, "改姓名", { 原名: before, 新名: trimmed })
+    return this.view(deviceId)
+  },
+
+  setPatientArchived({ deviceId, patientId, archived }) {
+    this.requireStaff(deviceId)
+    const patient = this.patient(patientId)
+    patient.archived = Boolean(archived)
+    this.save()
+    this.audit(deviceId, patient.archived ? "归档病人" : "恢复病人", { 病人: patient.name })
+    return this.view(deviceId)
+  },
+
+  // 病症有没有被任何一天的单用过（含今天）。用过的不能删，免得历史对不上。
+  conditionInUse(conditionId) {
+    for (const day of Object.values(this.state.days || {})) {
+      for (const entry of day?.entries || []) {
+        if (entry?.conditionIds?.includes(conditionId)) return true
+      }
+    }
+    return false
+  },
+
+  deleteCondition({ deviceId, patientId, conditionId }) {
+    this.requireStaff(deviceId)
+    const patient = this.patient(patientId)
+    const condition = this.condition(patient, conditionId)
+    if (!condition) fail(404, "找不到病症")
+    if (this.conditionInUse(conditionId)) {
+      fail(400, "这条病症还在某天的单上用过，不能删")
+    }
+    patient.conditions = patient.conditions.filter((row) => row.id !== conditionId)
+    this.save()
+    this.audit(deviceId, "删除病症", { 病人: patient.name, 病症: condition.name })
+    return this.view(deviceId)
+  },
+
   makeEntry(patient, conditionIds, focusConditionId) {
     const items = []
     for (const conditionId of conditionIds) {

@@ -11,6 +11,8 @@ const PULL_ARM = 64
 export function Today({ snap, onRefresh, onOpen }) {
   const today = snap.today || []
   const patients = snap.patients || []
+  const activePatients = useMemo(() => patients.filter((patient) => !patient.archived), [patients])
+  const archivedPatients = useMemo(() => patients.filter((patient) => patient.archived), [patients])
   const templates = snap.templates || []
   const [open, setOpen] = useState(false)
   const [banner, setBanner] = useState("")
@@ -26,6 +28,7 @@ export function Today({ snap, onRefresh, onOpen }) {
   const [query, setQuery] = useState("")
   const [templatePick, setTemplatePick] = useState(null)
   const [templateName, setTemplateName] = useState("")
+  const importRef = useRef(null)
   // ref 当同步守卫拦双击，state 让按钮变灰看得见。
   const pendingRef = useRef(false)
   const [pending, setPending] = useState(false)
@@ -107,18 +110,56 @@ export function Today({ snap, onRefresh, onOpen }) {
 
   const trimmedQuery = query.trim().toLowerCase()
   const shownPatients = useMemo(() => {
-    if (!trimmedQuery) return patients
-    return patients.filter(
+    if (!trimmedQuery) return activePatients
+    return activePatients.filter(
       (patient) =>
         patient.name.toLowerCase().includes(trimmedQuery) ||
         initialsOf(patient.name).includes(trimmedQuery) ||
         (patient.conditions || []).some((condition) => condition.name.toLowerCase().includes(trimmedQuery)),
     )
-  }, [patients, trimmedQuery])
+  }, [activePatients, trimmedQuery])
 
+  // 重名提醒看全部档案（含已归档），避免建出两个同名。
   const sameName = name.trim() ? patients.find((patient) => patient.name === name.trim()) : null
   const shownToday = mineOnly ? today.filter((entry) => (entry.mineTotal || 0) > 0) : today
   const byStaff = snap.todayByStaff || []
+
+  function downloadExport(data) {
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement("a")
+    link.href = url
+    link.download = `clinic-${snap.date || "backup"}.json`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+  }
+
+  function onImportFile(event) {
+    const file = event.target.files?.[0]
+    event.target.value = ""
+    if (!file) return
+    if (
+      !window.confirm(
+        "导入会替换本机治疗室的全部数据（病人、今日单、模板）。确定继续？",
+      )
+    ) {
+      return
+    }
+    run(async () => {
+      const text = await file.text()
+      let data
+      try {
+        data = JSON.parse(text)
+      } catch {
+        throw new Error("这个文件不是有效的 JSON")
+      }
+      await api.importClinic(data)
+      await onRefresh()
+      setSettings(false)
+    })
+  }
 
   // 有新活派给自己就震一下（第一次加载不震）。
   useEffect(() => {
@@ -425,7 +466,7 @@ export function Today({ snap, onRefresh, onOpen }) {
             </form>
             <section className="sheet-existing">
               <h3>已有病人</h3>
-              {patients.length > 6 ? (
+              {activePatients.length > 6 ? (
                 <input
                   className="today-search"
                   type="search"
@@ -506,6 +547,38 @@ export function Today({ snap, onRefresh, onOpen }) {
                 <h2 id="settings-title">设置</h2>
                 <p className="muted">关掉标签后仍会记住这台手机绑定的名字。</p>
                 <p className="error sheet-error">{error}</p>
+                <h3>备份</h3>
+                <div className="today-template-buttons">
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={pending}
+                    onClick={() =>
+                      run(async () => {
+                        const data = await api.exportClinic()
+                        downloadExport(data)
+                      })
+                    }
+                  >
+                    导出
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={pending}
+                    onClick={() => importRef.current?.click()}
+                  >
+                    导入
+                  </button>
+                  <input
+                    ref={importRef}
+                    type="file"
+                    accept="application/json,.json"
+                    hidden
+                    onChange={onImportFile}
+                  />
+                </div>
+                <p className="muted">导出会下载完整 JSON；导入会替换本机全部数据，请先确认。</p>
                 <h3>我是谁</h3>
                 <div className="patient-list">
                   {snap.staff?.map((person) => (
@@ -525,6 +598,32 @@ export function Today({ snap, onRefresh, onOpen }) {
                     </button>
                   ))}
                 </div>
+                {archivedPatients.length ? (
+                  <>
+                    <h3>已归档病人</h3>
+                    <p className="muted">归档后不会出现在「加入已有病人」里，历史和今日单上的条目仍保留。</p>
+                    <div className="patient-list">
+                      {archivedPatients.map((patient) => (
+                        <div key={patient.id} className="row-btn patient-row today-template-row">
+                          <span className="patient-name">{patient.name}</span>
+                          <button
+                            type="button"
+                            className="today-gear"
+                            disabled={pending}
+                            onClick={() =>
+                              run(async () => {
+                                await api.setPatientArchived(patient.id, false)
+                                await onRefresh()
+                              })
+                            }
+                          >
+                            取消归档
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                ) : null}
                 {templates.length ? (
                   <>
                     <h3>病症模板</h3>

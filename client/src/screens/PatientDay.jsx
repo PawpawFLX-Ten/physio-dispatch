@@ -522,6 +522,9 @@ export function PatientDay({ entryId, pulse, onBack }) {
   const [noteOpen, setNoteOpen] = useState(false)
   const [noteText, setNoteText] = useState("")
   const [historyOpen, setHistoryOpen] = useState(false)
+  const [renameOpen, setRenameOpen] = useState(false)
+  const [renameText, setRenameText] = useState("")
+  const [manageOpen, setManageOpen] = useState(false)
   const pendingRef = useRef(false)
   const mountedRef = useRef(true)
   const backLock = useRef(false)
@@ -539,7 +542,9 @@ export function PatientDay({ entryId, pulse, onBack }) {
       applyTmplOpen ||
       listOpen ||
       noteOpen ||
-      historyOpen,
+      historyOpen ||
+      renameOpen ||
+      manageOpen,
   )
   useBackLayer(Boolean(entryId), handleBack)
   useBackLayer(anySheet, () => {
@@ -578,6 +583,8 @@ export function PatientDay({ entryId, pulse, onBack }) {
     setUndo(null)
     setNotice(blankNotice)
     setPastMidnight(false)
+    setRenameOpen(false)
+    setManageOpen(false)
     api
       .entry(entryId)
       .then((result) => {
@@ -770,6 +777,8 @@ export function PatientDay({ entryId, pulse, onBack }) {
     setListOpen(false)
     setNoteOpen(false)
     setHistoryOpen(false)
+    setRenameOpen(false)
+    setManageOpen(false)
   }
 
   async function submitCondition(event) {
@@ -872,6 +881,68 @@ export function PatientDay({ entryId, pulse, onBack }) {
     if (ok) setNoteOpen(false)
   }
 
+  async function submitRename(event) {
+    event.preventDefault()
+    const trimmed = renameText.trim()
+    if (!trimmed) {
+      setNotice({ text: "请填写病人姓名", tone: "error" })
+      return
+    }
+    const clash = patients.find((patient) => patient.id !== entry.patientId && patient.name === trimmed)
+    if (clash) {
+      setNotice({ text: `已有叫${trimmed}的病人`, tone: "error" })
+      return
+    }
+    const ok = await mutate(
+      async () => {
+        await api.renamePatient(entry.patientId, trimmed)
+        return api.entry(entryId)
+      },
+      { success: "姓名已改", fail: "未能保存" },
+    )
+    if (ok) setRenameOpen(false)
+  }
+
+  function archivePatient() {
+    if (!window.confirm(`把「${entry.patientName}」归档？之后不会出现在加入病人列表里，今日单和历史仍保留。`)) {
+      return
+    }
+    mutate(
+      async () => {
+        await api.setPatientArchived(entry.patientId, true)
+        return api.entry(entryId)
+      },
+      { success: "已归档", fail: "未能保存" },
+    ).then((ok) => {
+      if (ok) setManageOpen(false)
+    })
+  }
+
+  function unarchivePatient() {
+    mutate(
+      async () => {
+        await api.setPatientArchived(entry.patientId, false)
+        return api.entry(entryId)
+      },
+      { success: "已取消归档", fail: "未能保存" },
+    ).then((ok) => {
+      if (ok) setManageOpen(false)
+    })
+  }
+
+  function removeUnusedCondition(condition) {
+    if (!window.confirm(`删除病症「${condition.name}」？只有从没上过任何一天单的病症才能删。`)) {
+      return
+    }
+    mutate(
+      async () => {
+        await api.deleteCondition(entry.patientId, condition.id)
+        return api.entry(entryId)
+      },
+      { fail: "未能删除" },
+    )
+  }
+
   function dropToday() {
     if (pastMidnight) {
       onBack()
@@ -925,11 +996,27 @@ export function PatientDay({ entryId, pulse, onBack }) {
     .filter(Boolean)
   const names = conditionText(entry)
   const covering =
-    assignOpen || copyOpen || saveTmplOpen || applyTmplOpen || listOpen || noteOpen || historyOpen || Boolean(activeItem) || leaveAsk
+    assignOpen ||
+    copyOpen ||
+    saveTmplOpen ||
+    applyTmplOpen ||
+    listOpen ||
+    noteOpen ||
+    historyOpen ||
+    renameOpen ||
+    manageOpen ||
+    Boolean(activeItem) ||
+    leaveAsk
   const focusName = entryConditions.length
     ? (entryConditions.find((condition) => condition.id === entry.focusConditionId) || entryConditions[0]).name
     : ""
   const firstUndone = (entry.items || []).findIndex((item) => !item.done)
+  const unusedConditions = (entry.conditions || []).filter(
+    (condition) => !(entry.conditionIds || []).includes(condition.id),
+  )
+  const renameClash =
+    renameText.trim() &&
+    patients.find((patient) => patient.id !== entry.patientId && patient.name === renameText.trim())
 
   return (
     <main className="patient-day">
@@ -938,6 +1025,7 @@ export function PatientDay({ entryId, pulse, onBack }) {
           返回
         </button>
         <h1>{entry.patientName}</h1>
+        {entry.archived ? <p className="muted">已归档 · 不会出现在加入病人列表</p> : null}
         {names ? <p className="patient-conditions">{names}</p> : null}
         {entry.note ? (
           <p className="patient-note" role="note">{`⚠ ${entry.note}`}</p>
@@ -1063,6 +1151,31 @@ export function PatientDay({ entryId, pulse, onBack }) {
             }}
           >
             备注
+          </button>
+          <button
+            type="button"
+            className="secondary"
+            disabled={pending}
+            onClick={() => {
+              setNotice(blankNotice)
+              closeSheets()
+              setRenameText(entry.patientName || "")
+              setRenameOpen(true)
+            }}
+          >
+            改姓名
+          </button>
+          <button
+            type="button"
+            className="secondary"
+            disabled={pending}
+            onClick={() => {
+              setNotice(blankNotice)
+              closeSheets()
+              setManageOpen(true)
+            }}
+          >
+            档案
           </button>
           <button
             type="button"
@@ -1337,7 +1450,7 @@ export function PatientDay({ entryId, pulse, onBack }) {
           <p className="patient-label">复制到</p>
           <div className="patient-stack">
             {patients
-              .filter((patient) => patient.id !== entry.patientId)
+              .filter((patient) => patient.id !== entry.patientId && !patient.archived)
               .map((patient) => (
               <button
                 type="button"
@@ -1394,6 +1507,64 @@ export function PatientDay({ entryId, pulse, onBack }) {
             </label>
             <button className="primary" type="submit" disabled={pending}>存下</button>
           </form>
+        </Sheet>
+      ) : null}
+
+      {renameOpen && !leaveAsk ? (
+        <Sheet title="改姓名" onClose={() => setRenameOpen(false)}>
+          <Notice notice={notice} />
+          <form className="stack" noValidate onSubmit={submitRename}>
+            <label className="field">
+              姓名
+              <input
+                value={renameText}
+                autoComplete="off"
+                enterKeyHint="done"
+                autoFocus
+                onChange={(event) => setRenameText(event.target.value)}
+              />
+            </label>
+            {renameClash ? <p className="error">{`已有叫${renameClash.name}的病人`}</p> : null}
+            <button className="primary" type="submit" disabled={pending || Boolean(renameClash)}>
+              存下
+            </button>
+          </form>
+        </Sheet>
+      ) : null}
+
+      {manageOpen && !leaveAsk ? (
+        <Sheet title="档案" onClose={() => setManageOpen(false)}>
+          <Notice notice={notice} />
+          <p className="muted">归档不会删档案；历史天数和今日单上的条目仍保留。</p>
+          {entry.archived ? (
+            <button type="button" className="secondary" disabled={pending} onClick={unarchivePatient}>
+              取消归档
+            </button>
+          ) : (
+            <button type="button" className="secondary" disabled={pending} onClick={archivePatient}>
+              归档病人
+            </button>
+          )}
+          <h3 className="patient-label">未在今天使用的病症</h3>
+          {unusedConditions.length === 0 ? (
+            <p className="muted">没有可删的：今天正在用的病症不能删；从没上过单的才可以删。</p>
+          ) : (
+            <div className="patient-stack">
+              {unusedConditions.map((condition) => (
+                <div key={condition.id} className="patient-history-row">
+                  <p className="patient-history-day">{condition.name}</p>
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={pending}
+                    onClick={() => removeUnusedCondition(condition)}
+                  >
+                    删除
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </Sheet>
       ) : null}
 

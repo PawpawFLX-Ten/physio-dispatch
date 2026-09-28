@@ -767,3 +767,81 @@ test("import drops day entries whose patient is gone", () => {
   assert.equal(store.day().entries.length, 0)
   assert.equal(store.view("doc").stage, "ready")
 })
+
+test("rename patient blocks empty and duplicate names", () => {
+  const store = openStore()
+  setupRoom(store)
+  const a = store.createPatient({ deviceId: "doc", name: "王阿姨", conditionName: "右膝疼痛" })
+  store.createPatient({ deviceId: "doc", name: "李叔", conditionName: "腰紧" })
+  assert.throws(() => store.renamePatient({ deviceId: "doc", patientId: a.entry.patientId, name: "  " }), /请填写病人姓名/)
+  assert.throws(
+    () => store.renamePatient({ deviceId: "doc", patientId: a.entry.patientId, name: "李叔" }),
+    /已有叫李叔的病人/,
+  )
+  store.renamePatient({ deviceId: "doc", patientId: a.entry.patientId, name: " 王阿姨改 " })
+  assert.equal(store.patient(a.entry.patientId).name, "王阿姨改")
+  assert.equal(store.entryView("doc", a.entry.id).entry.patientName, "王阿姨改")
+})
+
+test("archived patients leave the join list and can be restored", () => {
+  const store = openStore()
+  setupRoom(store)
+  const created = store.createPatient({ deviceId: "doc", name: "王阿姨", conditionName: "右膝疼痛" })
+  const patientId = created.entry.patientId
+  store.setPatientArchived({ deviceId: "doc", patientId, archived: true })
+  assert.equal(store.patient(patientId).archived, true)
+  assert.equal(store.patientList().find((row) => row.id === patientId).archived, true)
+  // 已归档仍在名单投影里（设置页要能恢复），但加入列表前端会滤掉。
+  assert.equal(store.patientList().some((row) => row.id === patientId && row.archived), true)
+  // 今日单上的条目仍在。
+  assert.equal(store.view("doc").today.some((row) => row.patientId === patientId), true)
+  store.setPatientArchived({ deviceId: "doc", patientId, archived: false })
+  assert.equal(store.patient(patientId).archived, false)
+})
+
+test("unused conditions can be deleted; ones on any day cannot", () => {
+  const store = openStore()
+  setupRoom(store)
+  const created = store.createPatient({ deviceId: "doc", name: "王阿姨", conditionName: "右膝疼痛" })
+  const patientId = created.entry.patientId
+  const usedId = store.patient(patientId).conditions[0].id
+  // 再加一条病症挂进今天，再从今天拿掉它：档案里还在，但今天的单不再引用 → 仍算「用过」。
+  store.addCondition({ deviceId: "doc", entryId: created.entry.id, name: "肩紧" })
+  const shoulderId = store.patient(patientId).conditions.find((row) => row.name === "肩紧").id
+  assert.throws(
+    () => store.deleteCondition({ deviceId: "doc", patientId, conditionId: usedId }),
+    /还在某天的单上用过/,
+  )
+  assert.throws(
+    () => store.deleteCondition({ deviceId: "doc", patientId, conditionId: shoulderId }),
+    /还在某天的单上用过/,
+  )
+  // 复制一条到别的病人，再在源病人上加一条从未上过单的。
+  const other = store.createPatient({ deviceId: "doc", name: "李叔", conditionName: "腰紧" })
+  // 直接往档案塞一条从未出现在 days 里的病症。
+  const orphan = {
+    id: "unused-cond",
+    name: "试了一下",
+    chiefSiteId: null,
+    chiefSide: null,
+    fresh: true,
+    items: [],
+  }
+  store.patient(patientId).conditions.push(orphan)
+  store.save()
+  store.deleteCondition({ deviceId: "doc", patientId, conditionId: orphan.id })
+  assert.equal(store.patient(patientId).conditions.some((row) => row.id === orphan.id), false)
+  assert.ok(other.entry.id)
+})
+
+test("export then import keeps archived flag", () => {
+  const store = openStore()
+  setupRoom(store)
+  const created = store.createPatient({ deviceId: "doc", name: "王阿姨", conditionName: "右膝疼痛" })
+  store.setPatientArchived({ deviceId: "doc", patientId: created.entry.patientId, archived: true })
+  const data = store.exportData("doc")
+  assert.equal(data.patients[0].archived, true)
+  store.importData({ deviceId: "doc", data })
+  assert.equal(store.patient(created.entry.patientId).archived, true)
+  assert.equal(store.patientList().find((row) => row.id === created.entry.patientId).archived, true)
+})

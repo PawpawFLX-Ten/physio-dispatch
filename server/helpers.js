@@ -77,6 +77,7 @@ function sanitizePatient(patient, staffIds) {
     id: patient.id,
     name: patient.name.trim(),
     note: typeof patient.note === "string" ? patient.note : "",
+    archived: Boolean(patient.archived),
     conditions,
   }
   // 上次派给谁：只保留仍在名单里的员工，脏 id / 已删员工一律丢掉。
