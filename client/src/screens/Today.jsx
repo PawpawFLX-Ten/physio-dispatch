@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { api } from "../api.js"
-import { initialsOf } from "../pinyin.js"
+import { matchesInitials } from "../pinyin.js"
 import { useBackLayer } from "../back-layer.js"
 import "./today.css"
 
@@ -108,14 +108,13 @@ export function Today({ snap, onRefresh, onOpen }) {
     setChecked((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]))
   }
 
-  const trimmedQuery = query.trim().toLowerCase()
+  const trimmedQuery = query.trim()
   const shownPatients = useMemo(() => {
     if (!trimmedQuery) return activePatients
     return activePatients.filter(
       (patient) =>
-        patient.name.toLowerCase().includes(trimmedQuery) ||
-        initialsOf(patient.name).includes(trimmedQuery) ||
-        (patient.conditions || []).some((condition) => condition.name.toLowerCase().includes(trimmedQuery)),
+        matchesInitials(trimmedQuery, patient.name) ||
+        (patient.conditions || []).some((condition) => matchesInitials(trimmedQuery, condition.name)),
     )
   }, [activePatients, trimmedQuery])
 
@@ -444,10 +443,7 @@ export function Today({ snap, onRefresh, onOpen }) {
                   <button
                     type="button"
                     className="secondary"
-                    onClick={() => {
-                      setOpen(false)
-                      choosePatient(sameName)
-                    }}
+                    onClick={() => choosePatient(sameName)}
                   >
                     打开 {sameName.name}
                   </button>
@@ -466,7 +462,7 @@ export function Today({ snap, onRefresh, onOpen }) {
             </form>
             <section className="sheet-existing">
               <h3>已有病人</h3>
-              {activePatients.length > 6 ? (
+              {activePatients.length ? (
                 <input
                   className="today-search"
                   type="search"
@@ -636,12 +632,13 @@ export function Today({ snap, onRefresh, onOpen }) {
                             type="button"
                             className="today-gear"
                             disabled={pending}
-                            onClick={() =>
+                            onClick={() => {
+                              if (!window.confirm(`删除模板「${template.name}」？确认后才会删掉。`)) return
                               run(async () => {
                                 await api.deleteTemplate(template.id)
                                 await onRefresh()
                               })
-                            }
+                            }}
                           >
                             删除
                           </button>

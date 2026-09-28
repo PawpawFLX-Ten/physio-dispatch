@@ -154,6 +154,7 @@ test("copy keeps the chain and leaves assignee empty until someone is chosen", (
   const store = openStore()
   setupRoom(store)
   const origin = store.createPatient({ deviceId: "doc", name: "王阿姨", conditionName: "右膝疼痛" })
+  store.setChief({ deviceId: "doc", entryId: origin.entry.id, targetId: "knee" })
   store.addItem({ deviceId: "doc", entryId: origin.entry.id, targetId: "hamstring" })
   store.leave({ deviceId: "doc", entryId: origin.entry.id, updateCondition: true })
   const other = store.createPatient({ deviceId: "doc", name: "李叔", conditionName: "腰紧" })
@@ -175,6 +176,7 @@ test("including a condition makes it the focus for new taps", () => {
   const store = openStore()
   setupRoom(store)
   const origin = store.createPatient({ deviceId: "doc", name: "王阿姨", conditionName: "右膝疼痛" })
+  store.setChief({ deviceId: "doc", entryId: origin.entry.id, targetId: "knee" })
   store.addItem({ deviceId: "doc", entryId: origin.entry.id, targetId: "hamstring" })
   store.leave({ deviceId: "doc", entryId: origin.entry.id, updateCondition: true })
   const created = store.createPatient({ deviceId: "doc", name: "李叔", conditionName: "腰紧" })
@@ -192,6 +194,7 @@ test("adding an existing patient already on today still includes selected condit
   const store = openStore()
   setupRoom(store)
   const origin = store.createPatient({ deviceId: "doc", name: "王阿姨", conditionName: "右膝疼痛" })
+  store.setChief({ deviceId: "doc", entryId: origin.entry.id, targetId: "knee" })
   store.addItem({ deviceId: "doc", entryId: origin.entry.id, targetId: "hamstring" })
   store.leave({ deviceId: "doc", entryId: origin.entry.id, updateCondition: true })
   const created = store.createPatient({ deviceId: "doc", name: "李叔", conditionName: "腰紧" })
@@ -237,6 +240,7 @@ test("completing records who did it and a second complete does not overwrite", (
   const store = openStore()
   setupRoom(store)
   const created = store.createPatient({ deviceId: "doc", name: "王阿姨", conditionName: "右膝疼痛" })
+  store.setChief({ deviceId: "doc", entryId: created.entry.id, targetId: "knee" })
   store.addItem({ deviceId: "doc", entryId: created.entry.id, targetId: "hamstring" })
   const itemId = created.entry.items?.length
     ? created.entry.items[0].id
@@ -314,6 +318,7 @@ test("setFocus directs the next added item", () => {
   const created = store.createPatient({ deviceId: "doc", name: "李叔", conditionName: "腰紧" })
   store.addCondition({ deviceId: "doc", entryId: created.entry.id, name: "右膝疼痛" })
   const [waist, knee] = store.patient(created.entry.patientId).conditions
+  store.setChief({ deviceId: "doc", entryId: created.entry.id, targetId: "lumbar" })
   store.setFocus({ deviceId: "doc", entryId: created.entry.id, conditionId: waist.id })
   store.addItem({ deviceId: "doc", entryId: created.entry.id, targetId: "lumbar" })
   assert.equal(store.entryById(created.entry.id).items.at(-1).conditionId, waist.id)
@@ -475,6 +480,7 @@ test("a template can be applied to an existing patient as a new condition", () =
   const store = openStore()
   setupRoom(store)
   const created = store.createPatient({ deviceId: "doc", name: "王阿姨", conditionName: "右膝疼痛" })
+  store.setChief({ deviceId: "doc", entryId: created.entry.id, targetId: "knee" })
   store.addItem({ deviceId: "doc", entryId: created.entry.id, targetId: "hamstring" })
   store.saveTemplateFromEntry({ deviceId: "doc", entryId: created.entry.id, name: "膝痛常规" })
   const templateId = store.state.templates[0].id
@@ -492,6 +498,7 @@ test("templates survive export and import", () => {
   const store = openStore()
   setupRoom(store)
   const created = store.createPatient({ deviceId: "doc", name: "王阿姨", conditionName: "右膝疼痛" })
+  store.setChief({ deviceId: "doc", entryId: created.entry.id, targetId: "knee" })
   store.addItem({ deviceId: "doc", entryId: created.entry.id, targetId: "hamstring" })
   store.saveTemplateFromEntry({ deviceId: "doc", entryId: created.entry.id, name: "膝痛常规" })
   const data = store.exportData("doc")
@@ -504,6 +511,7 @@ test("today rows count my items and the room remembers the last assignee", () =>
   const store = openStore()
   setupRoom(store)
   const created = store.createPatient({ deviceId: "doc", name: "王阿姨", conditionName: "右膝疼痛" })
+  store.setChief({ deviceId: "doc", entryId: created.entry.id, targetId: "knee" })
   store.addItem({ deviceId: "doc", entryId: created.entry.id, targetId: "hamstring" })
   store.addItem({ deviceId: "doc", entryId: created.entry.id, targetId: "soleus" })
   const aide = store.state.staff.find((person) => person.name === "小李")
@@ -641,6 +649,7 @@ test("today by staff groups counts per person with unassigned last", () => {
   const store = openStore()
   setupRoom(store)
   const created = store.createPatient({ deviceId: "doc", name: "王阿姨", conditionName: "右膝疼痛" })
+  store.setChief({ deviceId: "doc", entryId: created.entry.id, targetId: "knee" })
   store.addItem({ deviceId: "doc", entryId: created.entry.id, targetId: "hamstring" })
   store.addItem({ deviceId: "doc", entryId: created.entry.id, targetId: "soleus" })
   const aide = store.state.staff.find((person) => person.name === "小李")
@@ -677,6 +686,7 @@ test("visit history and last summary reflect what was actually done", () => {
   delete days[today]
   store.state.days = days
   const again = store.addExisting({ deviceId: "doc", patientId: created.entry.patientId })
+  store.setChief({ deviceId: "doc", entryId: again.entry.id, targetId: "knee", side: "left" })
   store.addItem({ deviceId: "doc", entryId: again.entry.id, targetId: "quad", side: "left" })
 
   const row = store.view("doc").patients.find((patient) => patient.name === "王阿姨")
@@ -696,6 +706,7 @@ test("print grouping carries the note for the handover sheet", () => {
   const store = openStore()
   setupRoom(store)
   const created = store.createPatient({ deviceId: "doc", name: "王阿姨", conditionName: "右膝疼痛" })
+  store.setChief({ deviceId: "doc", entryId: created.entry.id, targetId: "knee" })
   store.addItem({ deviceId: "doc", entryId: created.entry.id, targetId: "hamstring" })
   store.setPatientNote({ deviceId: "doc", patientId: created.entry.patientId, note: "术后三个月" })
   const groups = store.view("doc").todayByStaff
@@ -707,6 +718,7 @@ test("last assignee survives export and import", () => {
   const store = openStore()
   setupRoom(store)
   const created = store.createPatient({ deviceId: "doc", name: "王阿姨", conditionName: "右膝疼痛" })
+  store.setChief({ deviceId: "doc", entryId: created.entry.id, targetId: "knee" })
   store.addItem({ deviceId: "doc", entryId: created.entry.id, targetId: "hamstring" })
   const aide = store.state.staff.find((person) => person.name === "小李")
   store.assignAll({ deviceId: "doc", entryId: created.entry.id, assigneeId: aide.id })
@@ -723,6 +735,7 @@ test("orphan today entries are skipped so the room still opens", () => {
   const store = openStore()
   setupRoom(store)
   const created = store.createPatient({ deviceId: "doc", name: "王阿姨", conditionName: "右膝疼痛" })
+  store.setChief({ deviceId: "doc", entryId: created.entry.id, targetId: "knee" })
   store.addItem({ deviceId: "doc", entryId: created.entry.id, targetId: "hamstring" })
   const today = todayKey()
   store.state.days[today].entries.push({
@@ -844,4 +857,129 @@ test("export then import keeps archived flag", () => {
   store.importData({ deviceId: "doc", data })
   assert.equal(store.patient(created.entry.patientId).archived, true)
   assert.equal(store.patientList().find((row) => row.id === created.entry.patientId).archived, true)
+})
+
+test("restore puts a snapshot back with assignee and done intact", () => {
+  const store = openStore()
+  setupRoom(store)
+  const created = store.createPatient({ deviceId: "doc", name: "王阿姨", conditionName: "右膝疼痛" })
+  const entryId = created.entry.id
+  store.setChief({ deviceId: "doc", entryId, targetId: "knee" })
+  store.addItem({ deviceId: "doc", entryId, targetId: "hamstring" })
+  store.addItem({ deviceId: "doc", entryId, targetId: "soleus" })
+  const aide = store.state.staff.find((person) => person.name === "小李")
+  const [first, second] = store.entryById(entryId).items
+  store.patchItem({ deviceId: "doc", entryId, itemId: first.id, patch: { assigneeId: aide.id, done: true } })
+  const snapshot = structuredClone(store.entryById(entryId).items[0])
+  store.removeItem({ deviceId: "doc", entryId, itemId: snapshot.id })
+  assert.equal(store.entryById(entryId).items.length, 1)
+  assert.equal(store.entryById(entryId).items[0].id, second.id)
+  const restored = store.restoreItem({ deviceId: "doc", entryId, index: 0, item: snapshot })
+  assert.equal(restored.entry.items.length, 2)
+  assert.equal(restored.entry.items[0].targetId, "hamstring")
+  assert.notEqual(restored.entry.items[0].id, snapshot.id)
+  assert.equal(restored.entry.items[0].assigneeId, aide.id)
+  assert.equal(restored.entry.items[0].done, true)
+  assert.equal(restored.entry.items[0].completedBy, store.state.staff.find((person) => person.name === "之之").id)
+  assert.equal(restored.entry.items[1].id, second.id)
+  assert.throws(() => store.restoreItem({ deviceId: "doc", entryId, index: 9, item: snapshot }), /插回位置不对/)
+})
+
+test("reorder rejects duplicate ids and leaves the list unchanged", () => {
+  const store = openStore()
+  setupRoom(store)
+  const created = store.createPatient({ deviceId: "doc", name: "王阿姨", conditionName: "右膝疼痛" })
+  const entryId = created.entry.id
+  store.setChief({ deviceId: "doc", entryId, targetId: "knee" })
+  store.addItem({ deviceId: "doc", entryId, targetId: "hamstring" })
+  store.addItem({ deviceId: "doc", entryId, targetId: "soleus" })
+  const before = store.entryById(entryId).items.map((item) => item.id)
+  assert.throws(
+    () => store.reorder({ deviceId: "doc", entryId, orderedIds: [before[0], before[0]] }),
+    /顺序有重复/,
+  )
+  assert.deepEqual(
+    store.entryById(entryId).items.map((item) => item.id),
+    before,
+  )
+})
+
+test("addItem and quickAdd require a chief site before work items", () => {
+  const store = openStore()
+  setupRoom(store)
+  const created = store.createPatient({ deviceId: "doc", name: "王阿姨", conditionName: "右膝疼痛" })
+  const entryId = created.entry.id
+  assert.throws(() => store.addItem({ deviceId: "doc", entryId, targetId: "hamstring" }), /要治的地方/)
+  assert.throws(
+    () =>
+      store.quickAdd({
+        deviceId: "doc",
+        entryId,
+        chief: null,
+        items: [{ targetId: "hamstring", technique: "massage", direction: "along", dose: { minutes: 8 } }],
+      }),
+    /要治的地方/,
+  )
+  store.setChief({ deviceId: "doc", entryId, targetId: "knee" })
+  const added = store.addItem({ deviceId: "doc", entryId, targetId: "hamstring" })
+  assert.equal(added.entry.items[0].targetId, "hamstring")
+  const spoken = store.quickAdd({
+    deviceId: "doc",
+    entryId,
+    items: [{ targetId: "soleus", technique: "release", direction: "along", dose: { minutes: 6 } }],
+  })
+  assert.equal(spoken.entry.items.at(-1).targetId, "soleus")
+})
+
+test("copyCondition fromToday uses today's chain without assignee or done", () => {
+  const store = openStore()
+  setupRoom(store)
+  const origin = store.createPatient({ deviceId: "doc", name: "王阿姨", conditionName: "右膝疼痛" })
+  const entryId = origin.entry.id
+  store.setChief({ deviceId: "doc", entryId, targetId: "knee", side: "right" })
+  store.addItem({ deviceId: "doc", entryId, targetId: "hamstring", side: "right" })
+  store.addItem({ deviceId: "doc", entryId, targetId: "soleus", side: "right" })
+  // 回写旧存档：顺序与今天不同，用来证明 fromToday 不读档案。
+  store.leave({ deviceId: "doc", entryId, updateCondition: true })
+  const condition = store.patient(origin.entry.patientId).conditions[0]
+  condition.items.reverse()
+  store.save()
+  const items = store.entryById(entryId).items
+  const aide = store.state.staff.find((person) => person.name === "小李")
+  store.patchItem({
+    deviceId: "doc",
+    entryId,
+    itemId: items[0].id,
+    patch: { assigneeId: aide.id, done: true, technique: "release", dose: { minutes: 12 } },
+  })
+  store.reorder({ deviceId: "doc", entryId, orderedIds: [items[1].id, items[0].id] })
+  const other = store.createPatient({ deviceId: "doc", name: "李叔", conditionName: "腰紧" })
+  store.copyCondition({
+    deviceId: "doc",
+    conditionId: condition.id,
+    targetPatientId: other.entry.patientId,
+    fromToday: true,
+  })
+  const copied = store.patient(other.entry.patientId).conditions.find((row) => row.name === "右膝疼痛")
+  assert.deepEqual(
+    copied.items.map((item) => item.targetId),
+    ["soleus", "hamstring"],
+  )
+  assert.equal(copied.items[1].technique, "release")
+  assert.equal(copied.items[1].dose.minutes, 12)
+  assert.equal(copied.chiefSiteId, "knee")
+  assert.equal(copied.chiefSide, "right")
+  assert.equal(copied.items.every((item) => item.assigneeId === undefined), true)
+  assert.equal(copied.items.every((item) => item.done === undefined), true)
+  store.dropEntry({ deviceId: "doc", entryId })
+  assert.throws(
+    () =>
+      store.copyCondition({
+        deviceId: "doc",
+        conditionId: condition.id,
+        targetPatientId: other.entry.patientId,
+        fromToday: true,
+      }),
+    /今天没有这张单/,
+  )
 })

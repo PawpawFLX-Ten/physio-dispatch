@@ -75,14 +75,24 @@ export const api = {
   addItem: (id, targetId, side) => request(`/api/entries/${id}/items`, { method: "POST", body: { targetId, side } }),
   patchItem: (id, itemId, patch) => request(`/api/entries/${id}/items/${itemId}`, { method: "PATCH", body: { patch } }),
   removeItem: (id, itemId) => request(`/api/entries/${id}/items/${itemId}`, { method: "DELETE", body: {} }),
+  // 撤销删除：把删除前的完整项快照插回原位（含派工与完成）。
+  restoreItem: (id, index, item) =>
+    request(`/api/entries/${id}/items/restore`, { method: "POST", body: { index, item } }),
   reorder: (id, orderedIds) => request(`/api/entries/${id}/reorder`, { method: "POST", body: { orderedIds } }),
   assignAll: (id, assigneeId) => request(`/api/entries/${id}/assign-all`, { method: "POST", body: { assigneeId } }),
   includeCondition: (id, conditionId) => request(`/api/entries/${id}/include`, { method: "POST", body: { conditionId } }),
   setFocus: (id, conditionId) => request(`/api/entries/${id}/focus`, { method: "POST", body: { conditionId } }),
   dropEntry: (id) => request(`/api/entries/${id}/drop`, { method: "POST", body: {} }),
   leave: (id, updateCondition) => request(`/api/entries/${id}/leave`, { method: "POST", body: { updateCondition } }),
-  copyCondition: (conditionId, targetPatientId) =>
-    request(`/api/conditions/${conditionId}/copy`, { method: "POST", body: { targetPatientId } }),
+  // fromToday: true 时复制今日单这套（不复制派工和完成）；不传则仍复制病症存档。
+  copyCondition: (conditionId, targetPatientId, options = {}) =>
+    request(`/api/conditions/${conditionId}/copy`, {
+      method: "POST",
+      body: {
+        targetPatientId,
+        ...(options.fromToday ? { fromToday: true } : {}),
+      },
+    }),
   // 导出走 GET 附件下载；失败时接口返回 JSON 错误。
   exportClinic: async () => {
     const controller = new AbortController()

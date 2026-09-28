@@ -114,6 +114,8 @@ export const entryMethods = {
     for (const item of Array.isArray(items) ? items : []) {
       const target = targetById(item?.targetId)
       if (!target || target.kind === "site") fail(400, "这项不能当下手项")
+      // 下手项必须先有要治的地方（本请求里刚设的也算）。
+      if (!entry.chiefSiteId) fail(400, "请先点要治的地方，再加下手项")
       if (!TECHNIQUES.some((row) => row.id === item.technique)) fail(400, "手法不对")
       if (!DIRECTIONS.some((row) => row.id === item.direction)) fail(400, "方向不对")
       const dose =
@@ -282,6 +284,7 @@ export const entryMethods = {
     const target = targetById(targetId)
     if (!target || target.kind === "site") fail(400, "这个位置要先当作要治的地方，不能直接下手")
     const entry = this.entryById(entryId)
+    if (!entry.chiefSiteId) fail(400, "请先点要治的地方，再加下手项")
     const previous = entry.items[entry.items.length - 1]
     const technique = previous?.technique || "massage"
     const direction = previous?.direction || "along"
@@ -362,14 +365,57 @@ export const entryMethods = {
     return this.entryView(deviceId, entry.id)
   },
 
+  // 撤销删除：把快照插回原位，派工和完成状态原样保留，但换新 id。
+  restoreItem({ deviceId, entryId, index, item }) {
+    this.requireStaff(deviceId)
+    const entry = this.entryById(entryId)
+    const at = Number(index)
+    if (!Number.isInteger(at) || at < 0 || at > entry.items.length) fail(400, "插回位置不对")
+    if (!item || typeof item !== "object") fail(400, "缺少要插回的项")
+    const target = targetById(item.targetId)
+    if (!target || target.kind === "site") fail(400, "这个位置要先当作要治的地方，不能直接下手")
+    if (item.technique && !TECHNIQUES.some((row) => row.id === item.technique)) fail(400, "手法不对")
+    if (item.direction && !DIRECTIONS.some((row) => row.id === item.direction)) fail(400, "方向不对")
+    const focus =
+      entry.focusConditionId && entry.conditionIds.includes(entry.focusConditionId)
+        ? entry.focusConditionId
+        : entry.conditionIds[entry.conditionIds.length - 1]
+    const conditionId =
+      typeof item.conditionId === "string" && entry.conditionIds.includes(item.conditionId)
+        ? item.conditionId
+        : focus
+    const technique = item.technique || "massage"
+    const direction = item.direction || "along"
+    const dose = item.dose ? structuredClone(item.dose) : defaultDose(technique)
+    const restored = {
+      id: id(),
+      conditionId,
+      sourceItemId: typeof item.sourceItemId === "string" ? item.sourceItemId : null,
+      targetId: item.targetId,
+      side: normalizeSide(item.side),
+      technique,
+      direction,
+      dose,
+      assigneeId: typeof item.assigneeId === "string" ? item.assigneeId : null,
+      done: Boolean(item.done),
+      completedBy: typeof item.completedBy === "string" ? item.completedBy : null,
+    }
+    entry.items.splice(at, 0, restored)
+    this.save()
+    this.audit(deviceId, "插回一项", { 项: targetTitle(restored.targetId, restored.side) })
+    return this.entryView(deviceId, entry.id)
+  },
+
   reorder({ deviceId, entryId, orderedIds }) {
     this.requireStaff(deviceId)
     const entry = this.entryById(entryId)
+    const ids = Array.isArray(orderedIds) ? orderedIds : []
+    if (new Set(ids).size !== ids.length) fail(400, "顺序有重复")
     const map = new Map(entry.items.map((item) => [item.id, item]))
-    if (orderedIds.length !== entry.items.length || orderedIds.some((itemId) => !map.has(itemId))) {
+    if (ids.length !== entry.items.length || ids.some((itemId) => !map.has(itemId))) {
       fail(400, "顺序不完整")
     }
-    entry.items = orderedIds.map((itemId) => map.get(itemId))
+    entry.items = ids.map((itemId) => map.get(itemId))
     this.save()
     this.audit(deviceId, "调整顺序")
     return this.entryView(deviceId, entry.id)
@@ -472,7 +518,7 @@ export const entryMethods = {
     return this.entryView(deviceId, entry.id)
   },
 
-  copyCondition({ deviceId, conditionId, targetPatientId }) {
+  copyCondition({ deviceId, conditionId, targetPatientId, fromToday }) {
     this.requireStaff(deviceId)
     let source = null
     let sourcePatient = null
@@ -487,13 +533,28 @@ export const entryMethods = {
     if (!source) fail(404, "找不到病症")
     const target = this.patient(targetPatientId)
     if (target.id === sourcePatient.id) fail(400, "请复制到另一个病人")
+
+    let chiefSiteId = source.chiefSiteId
+    let chiefSide = source.chiefSide || null
+    let items = source.items
+    if (fromToday) {
+      // 用今天这张单上的工作链，不走档案里旧存档。
+      const todayEntry = this.day().entries.find(
+        (entry) => entry.patientId === sourcePatient.id && entry.conditionIds.includes(conditionId),
+      )
+      if (!todayEntry) fail(404, "今天没有这张单")
+      chiefSiteId = todayEntry.chiefSiteId
+      chiefSide = todayEntry.chiefSide || null
+      items = todayEntry.items.filter((item) => item.conditionId === conditionId)
+    }
+
     target.conditions.push({
       id: id(),
       name: source.name,
-      chiefSiteId: source.chiefSiteId,
-      chiefSide: source.chiefSide || null,
+      chiefSiteId,
+      chiefSide,
       fresh: false,
-      items: source.items.map((item) => ({
+      items: items.map((item) => ({
         id: id(),
         targetId: item.targetId,
         side: item.side || null,
@@ -503,7 +564,7 @@ export const entryMethods = {
       })),
     })
     this.save()
-    this.audit(deviceId, "复制病症", { 病症: source.name, 到: target.name })
+    this.audit(deviceId, fromToday ? "从今天复制病症" : "复制病症", { 病症: source.name, 到: target.name })
     return this.view(deviceId)
   },
 }

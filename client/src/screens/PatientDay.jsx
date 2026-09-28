@@ -50,6 +50,23 @@ function conditionText(entry) {
     .join("、")
 }
 
+// 撤销恢复用的持久化字段快照（不含界面展示名）。
+function itemSnapshot(item) {
+  return {
+    id: item.id,
+    conditionId: item.conditionId,
+    sourceItemId: item.sourceItemId ?? null,
+    targetId: item.targetId,
+    side: item.side || null,
+    technique: item.technique,
+    direction: item.direction,
+    dose: item.dose == null ? item.dose : structuredClone(item.dose),
+    assigneeId: item.assigneeId || null,
+    done: Boolean(item.done),
+    completedBy: item.completedBy || null,
+  }
+}
+
 function itemLine(item) {
   return [
     techniqueLabel(item.technique),
@@ -508,6 +525,7 @@ export function PatientDay({ entryId, pulse, onBack }) {
   const [assignOpen, setAssignOpen] = useState(false)
   const [activeItemId, setActiveItemId] = useState(null)
   const [copyOpen, setCopyOpen] = useState(false)
+  const [copyMode, setCopyMode] = useState("archive")
   const [leaveAsk, setLeaveAsk] = useState(false)
   const [pending, setPending] = useState(false)
   const [conditionName, setConditionName] = useState("")
@@ -525,10 +543,13 @@ export function PatientDay({ entryId, pulse, onBack }) {
   const [renameOpen, setRenameOpen] = useState(false)
   const [renameText, setRenameText] = useState("")
   const [manageOpen, setManageOpen] = useState(false)
+  const [moreOpen, setMoreOpen] = useState(false)
   const pendingRef = useRef(false)
   const mountedRef = useRef(true)
   const backLock = useRef(false)
   const tailRef = useRef(Promise.resolve())
+  const queueDepthRef = useRef(0)
+  const staleRef = useRef(false)
   const onSelectRef = useRef(() => {})
   const stableSelect = useCallback((targetId) => onSelectRef.current(targetId), [])
 
@@ -544,7 +565,8 @@ export function PatientDay({ entryId, pulse, onBack }) {
       noteOpen ||
       historyOpen ||
       renameOpen ||
-      manageOpen,
+      manageOpen ||
+      moreOpen,
   )
   useBackLayer(Boolean(entryId), handleBack)
   useBackLayer(anySheet, () => {
@@ -581,6 +603,8 @@ export function PatientDay({ entryId, pulse, onBack }) {
     setListOpen(false)
     setListQuery("")
     setUndo(null)
+    setMoreOpen(false)
+    setCopyMode("archive")
     setNotice(blankNotice)
     setPastMidnight(false)
     setRenameOpen(false)
@@ -605,10 +629,14 @@ export function PatientDay({ entryId, pulse, onBack }) {
     }
   }, [entryId, applyResult])
 
-  // 别的手机改了这张单：拉一次最新的。自己的改动走 mutate，不用重复拉。
+  // 别的手机改了这张单：拉一次最新的。自己改动排队中则先记过期，队空后再补拉。
   useEffect(() => {
     if (!pulse) return
-    if (pendingRef.current || !mountedRef.current) return
+    if (queueDepthRef.current > 0 || pendingRef.current) {
+      staleRef.current = true
+      return
+    }
+    if (!mountedRef.current) return
     api
       .entry(entryId)
       .then(applyResult)
@@ -627,11 +655,47 @@ export function PatientDay({ entryId, pulse, onBack }) {
     return () => clearTimeout(timer)
   }, [undo])
 
+  function refreshIfStale() {
+    if (!staleRef.current || queueDepthRef.current > 0) return
+    if (!mountedRef.current) return
+    staleRef.current = false
+    api
+      .entry(entryId)
+      .then((result) => {
+        if (mountedRef.current) applyResult(result)
+      })
+      .catch((err) => {
+        if (isPastMidnightError(err) && mountedRef.current) {
+          setPastMidnight(true)
+          setNotice(pastMidnightNotice)
+        }
+      })
+  }
+
+  async function reloadEntryKeepNotice() {
+    try {
+      const latest = await api.entry(entryId)
+      if (mountedRef.current) applyResult(latest)
+    } catch (err) {
+      if (isPastMidnightError(err) && mountedRef.current) {
+        setPastMidnight(true)
+        setNotice(pastMidnightNotice)
+      }
+    }
+  }
+
   function enqueue(task) {
+    queueDepthRef.current += 1
     const run = tailRef.current.then(task, task)
     tailRef.current = run.then(
-      () => {},
-      () => {},
+      () => {
+        queueDepthRef.current = Math.max(0, queueDepthRef.current - 1)
+        if (queueDepthRef.current === 0) refreshIfStale()
+      },
+      () => {
+        queueDepthRef.current = Math.max(0, queueDepthRef.current - 1)
+        if (queueDepthRef.current === 0) refreshIfStale()
+      },
     )
     return run
   }
@@ -655,6 +719,8 @@ export function PatientDay({ entryId, pulse, onBack }) {
           return false
         }
         setNotice({ text: options.fail || err?.message || "未能保存", tone: "error" })
+        // 改单失败（尤其重排 400）后拉回服务器清单，别停在过期预览上。
+        await reloadEntryKeepNotice()
         return false
       } finally {
         pendingRef.current = false
@@ -688,6 +754,14 @@ export function PatientDay({ entryId, pulse, onBack }) {
           setAssignOpen(false)
           setCopyOpen(false)
           setActiveItemId(null)
+          setMoreOpen(false)
+          setSaveTmplOpen(false)
+          setApplyTmplOpen(false)
+          setListOpen(false)
+          setNoteOpen(false)
+          setHistoryOpen(false)
+          setRenameOpen(false)
+          setManageOpen(false)
           setNotice(blankNotice)
           setLeaveAsk(true)
           return
@@ -760,7 +834,13 @@ export function PatientDay({ entryId, pulse, onBack }) {
       setReselecting(true)
       return
     }
-    if (allowsWork(target)) await mutate(() => api.addItem(entryId, targetId, pickedSide))
+    if (allowsWork(target)) {
+      if (!entry.chiefSiteId) {
+        setNotice({ text: "先点要治的地方", tone: "error" })
+        return
+      }
+      await mutate(() => api.addItem(entryId, targetId, pickedSide))
+    }
   }
   onSelectRef.current = onSelect
 
@@ -779,6 +859,7 @@ export function PatientDay({ entryId, pulse, onBack }) {
     setHistoryOpen(false)
     setRenameOpen(false)
     setManageOpen(false)
+    setMoreOpen(false)
   }
 
   async function submitCondition(event) {
@@ -793,22 +874,26 @@ export function PatientDay({ entryId, pulse, onBack }) {
       setNotice({ text: "先选择病症和病人", tone: "error" })
       return
     }
-    const ok = await mutate(() => api.copyCondition(copyConditionId, copyPatientId), {
-      success: "已复制，派给谁要重新填",
-    })
+    const fromToday = copyMode === "today"
+    const ok = await mutate(
+      () => api.copyCondition(copyConditionId, copyPatientId, fromToday ? { fromToday: true } : {}),
+      {
+        success: fromToday ? "已复制今天这套，派给谁要重新填" : "已复制，派给谁要重新填",
+      },
+    )
     if (ok) {
       setCopyPatientId("")
       setCopyOpen(false)
     }
   }
 
-  // 左滑去掉之后给 5 秒反悔的机会：先删，撤销就把内容原样放回原位。
+  // 左滑去掉之后给 5 秒反悔的机会：先删，撤销用 restore 把完整快照插回原位。
   function removeWithUndo(itemId) {
     const snapshot = entry?.items || []
     const index = snapshot.findIndex((item) => item.id === itemId)
-    const item = index >= 0 ? snapshot[index] : null
+    const item = index >= 0 ? itemSnapshot(snapshot[index]) : null
     setUndo(null)
-    mutate(() => api.removeItem(entryId, itemId), { fail: "未能保存" }).then((ok) => {
+    return mutate(() => api.removeItem(entryId, itemId), { fail: "未能保存" }).then((ok) => {
       if (ok && item) setUndo({ item, index })
     })
   }
@@ -817,27 +902,10 @@ export function PatientDay({ entryId, pulse, onBack }) {
     const target = undo
     if (!target) return
     setUndo(null)
-    mutate(async () => {
-      const added = await api.addItem(entryId, target.item.targetId, target.item.side || null)
-      const created = added.entry.items[added.entry.items.length - 1]
-      if (
-        created &&
-        (created.technique !== target.item.technique ||
-          created.direction !== target.item.direction ||
-          JSON.stringify(created.dose) !== JSON.stringify(target.item.dose))
-      ) {
-        await api.patchItem(entryId, created.id, {
-          technique: target.item.technique,
-          direction: target.item.direction,
-          dose: target.item.dose,
-        })
-      }
-      const latest = await api.entry(entryId)
-      if (!created) return latest
-      const others = latest.entry.items.filter((item) => item.id !== created.id).map((item) => item.id)
-      const ordered = [...others.slice(0, target.index), created.id, ...others.slice(target.index)]
-      return api.reorder(entryId, ordered)
-    }, { success: "已恢复", fail: "未能恢复" })
+    mutate(() => api.restoreItem(entryId, target.index, target.item), {
+      success: "已恢复",
+      fail: "未能恢复",
+    })
   }
 
   async function submitTemplate(event) {
@@ -861,6 +929,10 @@ export function PatientDay({ entryId, pulse, onBack }) {
 
   // 「说一句」的解析结果一次入库，面板留着继续说下一句。
   function quickAddParsed(parsed, afterSave) {
+    if (parsed.items.length && !parsed.chief && !entry?.chiefSiteId) {
+      setNotice({ text: "先点要治的地方", tone: "error" })
+      return
+    }
     mutate(() => api.quickAdd(entryId, parsed), {
       success: parsed.items.length ? `已加 ${parsed.items.length} 项` : "已记要治的地方",
       fail: "未能保存",
@@ -948,6 +1020,9 @@ export function PatientDay({ entryId, pulse, onBack }) {
       onBack()
       return
     }
+    if (!window.confirm(`把「${entry.patientName}」从今日单拿掉？`)) {
+      return
+    }
     if (backLock.current) return
     backLock.current = true
     return enqueue(async () => {
@@ -966,6 +1041,7 @@ export function PatientDay({ entryId, pulse, onBack }) {
           return
         }
         setNotice({ text: "未能保存", tone: "error" })
+        await reloadEntryKeepNotice()
       } finally {
         pendingRef.current = false
         backLock.current = false
@@ -1005,6 +1081,7 @@ export function PatientDay({ entryId, pulse, onBack }) {
     historyOpen ||
     renameOpen ||
     manageOpen ||
+    moreOpen ||
     Boolean(activeItem) ||
     leaveAsk
   const focusName = entryConditions.length
@@ -1097,13 +1174,30 @@ export function PatientDay({ entryId, pulse, onBack }) {
           >
             名单加项
           </button>
+          <button
+            type="button"
+            className="secondary"
+            disabled={pending}
+            onClick={() => {
+              setNotice(blankNotice)
+              closeSheets()
+              setMoreOpen(true)
+            }}
+          >
+            更多
+          </button>
+        </div>
+      </div>
+
+      {moreOpen && !leaveAsk ? (
+        <Sheet title="更多" onClose={() => setMoreOpen(false)}>
+          <Notice notice={notice} />
           {entry.items?.length > 0 ? (
             <button
               type="button"
               className="secondary"
               onClick={() => {
-                setNotice(blankNotice)
-                closeSheets()
+                setMoreOpen(false)
                 setAssignOpen(true)
               }}
             >
@@ -1116,8 +1210,7 @@ export function PatientDay({ entryId, pulse, onBack }) {
               className="secondary"
               disabled={pending}
               onClick={() => {
-                setNotice(blankNotice)
-                closeSheets()
+                setMoreOpen(false)
                 setTemplateName(focusName)
                 setSaveTmplOpen(true)
               }}
@@ -1131,8 +1224,7 @@ export function PatientDay({ entryId, pulse, onBack }) {
               className="secondary"
               disabled={pending}
               onClick={() => {
-                setNotice(blankNotice)
-                closeSheets()
+                setMoreOpen(false)
                 setApplyTmplOpen(true)
               }}
             >
@@ -1144,8 +1236,7 @@ export function PatientDay({ entryId, pulse, onBack }) {
             className="secondary"
             disabled={pending}
             onClick={() => {
-              setNotice(blankNotice)
-              closeSheets()
+              setMoreOpen(false)
               setNoteText(entry.note || "")
               setNoteOpen(true)
             }}
@@ -1157,33 +1248,7 @@ export function PatientDay({ entryId, pulse, onBack }) {
             className="secondary"
             disabled={pending}
             onClick={() => {
-              setNotice(blankNotice)
-              closeSheets()
-              setRenameText(entry.patientName || "")
-              setRenameOpen(true)
-            }}
-          >
-            改姓名
-          </button>
-          <button
-            type="button"
-            className="secondary"
-            disabled={pending}
-            onClick={() => {
-              setNotice(blankNotice)
-              closeSheets()
-              setManageOpen(true)
-            }}
-          >
-            档案
-          </button>
-          <button
-            type="button"
-            className="secondary"
-            disabled={pending}
-            onClick={() => {
-              setNotice(blankNotice)
-              closeSheets()
+              setMoreOpen(false)
               setHistoryOpen(true)
             }}
           >
@@ -1218,25 +1283,54 @@ export function PatientDay({ entryId, pulse, onBack }) {
             type="button"
             className="secondary"
             onClick={() => {
-              setNotice(blankNotice)
-              closeSheets()
+              setMoreOpen(false)
               const ids = entry.conditionIds || []
               if (ids.length === 1) setCopyConditionId(ids[0])
+              setCopyMode("archive")
               setCopyOpen(true)
             }}
           >
-            复制病症
+            复制
           </button>
           <button
             type="button"
             className="secondary"
             disabled={pending}
-            onClick={dropToday}
+            onClick={() => {
+              setMoreOpen(false)
+              dropToday()
+            }}
           >
             从今日单拿掉
           </button>
-        </div>
-      </div>
+          <button
+            type="button"
+            className="secondary"
+            disabled={pending}
+            onClick={() => {
+              setMoreOpen(false)
+              setRenameText(entry.patientName || "")
+              setRenameOpen(true)
+            }}
+          >
+            改姓名
+          </button>
+          <button
+            type="button"
+            className="secondary"
+            disabled={pending}
+            onClick={() => {
+              setMoreOpen(false)
+              setManageOpen(true)
+            }}
+          >
+            档案
+          </button>
+          <button type="button" className="secondary" onClick={() => setMoreOpen(false)}>
+            收起
+          </button>
+        </Sheet>
+      ) : null}
 
       {assignOpen && !leaveAsk ? (
         <Sheet title="全部派给" onClose={() => setAssignOpen(false)}>
@@ -1431,8 +1525,30 @@ export function PatientDay({ entryId, pulse, onBack }) {
       ) : null}
 
       {copyOpen && !leaveAsk ? (
-        <Sheet title="复制病症" onClose={() => setCopyOpen(false)}>
+        <Sheet title="复制" onClose={() => setCopyOpen(false)}>
           <Notice notice={notice} />
+          <p className="patient-label">复制什么</p>
+          <div className="patient-stack">
+            <button
+              type="button"
+              className={copyMode === "archive" ? "patient-choice is-on" : "patient-choice"}
+              aria-pressed={copyMode === "archive"}
+              onClick={() => setCopyMode("archive")}
+            >
+              复制病症存档
+            </button>
+            <button
+              type="button"
+              className={copyMode === "today" ? "patient-choice is-on" : "patient-choice"}
+              aria-pressed={copyMode === "today"}
+              onClick={() => setCopyMode("today")}
+            >
+              复制今天这套
+            </button>
+          </div>
+          {copyMode === "archive" && entry.diverged ? (
+            <p className="muted">今天的改动还没写回病症，存档可能不是今天这套。</p>
+          ) : null}
           <p className="patient-label">这一张单上的病症</p>
           <div className="patient-stack">
             {entryConditions.map((condition) => (
@@ -1484,6 +1600,10 @@ export function PatientDay({ entryId, pulse, onBack }) {
             )
           }}
           onPickWork={(targetId, side) => {
+            if (!entry.chiefSiteId) {
+              setNotice({ text: "先点要治的地方", tone: "error" })
+              return
+            }
             mutate(() => api.addItem(entryId, targetId, side), { success: `已加 ${targetTitle(targetId, side)}` })
           }}
           onQuickAdd={quickAddParsed}
