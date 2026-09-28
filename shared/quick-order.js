@@ -1,0 +1,205 @@
+// 「说一句」快速开单的解析器。
+// 词表是封闭的（33 个目标 + 同义词、3 个手法、4 个方向、左右双、数字），
+// 规则匹配就够，不需要模型：主治说一遍，助手打字或用键盘语音输入，直接变成清单。
+import { allowsChief, hasSides, targetById } from "./catalog.js"
+
+const TARGET_ALIASES = [
+  ["膝盖", "knee"], ["膝关节", "knee"], ["膝", "knee"],
+  ["腰", "lumbar"],
+  ["脖子", "neck"], ["颈椎", "neck"], ["颈", "neck"],
+  ["肩", "shoulder"],
+  ["腘绳肌", "hamstring"], ["腘绳", "hamstring"], ["大腿后侧", "hamstring"], ["大腿后", "hamstring"],
+  ["股四头肌", "quad"], ["股四头", "quad"], ["大腿前侧", "quad"], ["大腿前", "quad"],
+  ["臀", "glute"], ["屁股", "glute"],
+  ["比目鱼肌", "soleus"], ["比目鱼", "soleus"],
+  ["腓肠肌", "gastroc"], ["腓肠", "gastroc"], ["小腿肚", "gastroc"],
+  ["足底", "plantar"], ["脚底", "plantar"], ["脚掌", "plantar"],
+  ["承山", "chengshan"],
+  ["髂胫束", "itband"],
+  ["内收肌群", "adductors"], ["内收肌", "adductors"], ["大腿内侧", "adductors"],
+  ["缝匠肌", "sartorius"], ["缝匠", "sartorius"],
+  ["腘肌", "popliteus"],
+  ["髂腰肌", "iliopsoas"], ["髂腰", "iliopsoas"],
+  ["梨状肌", "piriformis"], ["梨状", "piriformis"],
+  ["胫骨前肌", "tib-anterior"], ["胫前肌", "tib-anterior"], ["小腿前侧", "tib-anterior"],
+  ["胫骨后肌", "tib-posterior"], ["胫后肌", "tib-posterior"],
+  ["腓骨长短肌", "fibularis"], ["腓骨肌", "fibularis"],
+  ["趾长伸肌", "edl"],
+  ["趾长屈肌", "fdl"],
+  ["斜方肌", "trapezius"], ["斜方", "trapezius"],
+  ["肩胛提肌", "levator-scap"],
+  ["菱形肌", "rhomboid"], ["菱形", "rhomboid"],
+  ["前锯肌", "serratus"], ["前锯", "serratus"],
+  ["冈上肌", "supraspinatus"], ["冈上", "supraspinatus"],
+  ["冈下肌", "infraspinatus"], ["冈下", "infraspinatus"],
+  ["肩胛下肌", "subscapularis"],
+  ["小圆肌", "teres-minor"], ["小圆", "teres-minor"],
+  ["大圆肌", "teres-major"], ["大圆", "teres-major"],
+  ["胸锁乳突肌", "scm"], ["胸锁乳突", "scm"],
+]
+
+const CN_DIGITS = { 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 }
+
+function cnNum(text) {
+  if (/^[0-9]+$/.test(text)) return Number(text)
+  if (text.includes("十")) {
+    const [head = "", tail = ""] = text.split("十")
+    return (head ? CN_DIGITS[head] : 1) * 10 + (tail ? CN_DIGITS[tail] || 0 : 0)
+  }
+  return CN_DIGITS[text] || 0
+}
+
+const NUM = "([0-9]+|[一二两三四五六七八九十]{1,3})"
+
+// 把整句话变成记号流，再从左到右走一遍。
+// 手法/方向/剂量跟在肌肉名后面也认得（「股四头按摩八分钟」），会回头补到刚加的那项上，
+// 后面没说的沿用上一项（「腘绳肌松解，比目鱼肌」——比目鱼肌也是松解）。
+export function parseQuickOrder(text) {
+  const raw = String(text || "")
+  const spans = []
+
+  function addAll(pattern, kind, map) {
+    for (const match of raw.matchAll(pattern)) {
+      spans.push({ start: match.index, end: match.index + match[0].length, kind, value: map(match) })
+    }
+  }
+
+  for (const [alias, targetId] of TARGET_ALIASES) {
+    let from = 0
+    for (;;) {
+      const at = raw.indexOf(alias, from)
+      if (at < 0) break
+      spans.push({ start: at, end: at + alias.length, kind: "target", value: targetId })
+      from = at + alias.length
+    }
+  }
+  addAll(/按摩|揉捏|揉|推拿/g, "technique", () => "massage")
+  addAll(/松解|放松/g, "technique", () => "release")
+  addAll(/器械|训练/g, "technique", () => "equipment")
+  addAll(/沿肌纤维|顺肌纤维/g, "direction", () => "along")
+  addAll(/逆着肌纤维|逆肌纤维/g, "direction", () => "against")
+  addAll(/由近到远|从近到远/g, "direction", () => "outward")
+  addAll(/由远到近|从远到近/g, "direction", () => "inward")
+  addAll(new RegExp(`${NUM}分钟`, "g"), "dose", (m) => ({ minutes: cnNum(m[1]) }))
+  addAll(new RegExp(`${NUM}组`, "g"), "dose", (m) => ({ sets: cnNum(m[1]) }))
+  addAll(new RegExp(`${NUM}次`, "g"), "dose", (m) => ({ reps: cnNum(m[1]) }))
+  addAll(/两侧|两边|双/g, "side", () => "both")
+  addAll(/左/g, "side", () => "left")
+  addAll(/右/g, "side", () => "right")
+
+  // 同一个位置长的词优先（「肩胛提肌」不能拆成「肩」），重叠的丢掉。
+  spans.sort((a, b) => a.start - b.start || b.end - b.start - (a.end - a.start))
+  const tokens = []
+  let lastEnd = -1
+  for (const span of spans) {
+    if (span.start < lastEnd) continue
+    tokens.push(span)
+    lastEnd = span.end
+  }
+  // 「左右肩」= 双侧
+  for (let i = 0; i < tokens.length - 1; i++) {
+    if (
+      tokens[i].kind === "side" && tokens[i].value === "left" &&
+      tokens[i + 1].kind === "side" && tokens[i + 1].value === "right" &&
+      tokens[i + 1].start === tokens[i].end
+    ) {
+      tokens[i] = { ...tokens[i], value: "both" }
+      tokens.splice(i + 1, 1)
+    }
+  }
+
+  const sticky = { technique: "massage", direction: "along", dose: { minutes: 8 } }
+  let pendingSide = null
+  let chief = null
+  const items = []
+  let groupStart = 0
+
+  for (const token of tokens) {
+    if (token.kind === "target") {
+      const target = targetById(token.value)
+      if (!target) continue
+      if (!chief && allowsChief(target)) {
+        chief = { targetId: target.id, side: hasSides(target) ? pendingSide : null }
+      } else if (target.kind !== "site") {
+        const sides = pendingSide === "both" ? ["left", "right"] : [pendingSide]
+        groupStart = items.length
+        for (const side of sides) {
+          items.push({
+            targetId: target.id,
+            side: hasSides(target) ? side : null,
+            technique: sticky.technique,
+            direction: sticky.direction,
+            dose: doseFor(sticky),
+          })
+        }
+      }
+      // 说「左膝，股四头…」时左右会一直管到换了侧为止；「双侧」只管当次。
+      if (pendingSide === "both") pendingSide = null
+    } else if (token.kind === "side") {
+      pendingSide = token.value
+    } else if (token.kind === "technique") {
+      sticky.technique = token.value
+      if (token.value === "equipment") sticky.dose = { sets: 3, reps: 10 }
+      applyToGroup(items, groupStart, "technique", token.value, sticky)
+    } else if (token.kind === "direction") {
+      sticky.direction = token.value
+      applyToGroup(items, groupStart, "direction", token.value, sticky)
+    } else if (token.kind === "dose") {
+      if (token.value.sets != null || token.value.reps != null) {
+        // 说到组数次数就按器械训练算
+        sticky.technique = "equipment"
+        applyToGroup(items, groupStart, "technique", "equipment", sticky)
+      }
+      mergeDose(sticky, token.value)
+      for (let i = groupStart; i < items.length; i++) items[i].dose = doseFor(sticky)
+    }
+  }
+
+  return { chief, items, unknown: leftoverWords(raw, tokens) }
+}
+
+function doseFor(sticky) {
+  if (sticky.technique === "equipment") {
+    return {
+      sets: Math.max(1, sticky.dose.sets || 3),
+      reps: Math.max(1, sticky.dose.reps || 10),
+    }
+  }
+  return { minutes: Math.max(1, sticky.dose.minutes || 8) }
+}
+
+function mergeDose(sticky, dose) {
+  if (dose.minutes != null) {
+    sticky.dose = { minutes: dose.minutes }
+    return
+  }
+  sticky.dose = {
+    sets: Math.max(1, dose.sets ?? sticky.dose.sets ?? 3),
+    reps: Math.max(1, dose.reps ?? sticky.dose.reps ?? 10),
+  }
+}
+
+function applyToGroup(items, groupStart, key, value, sticky) {
+  for (let i = groupStart; i < items.length; i++) {
+    items[i][key] = value
+    items[i].dose = doseFor({ ...sticky, technique: items[i].technique })
+  }
+}
+
+// 没被吃掉的词挑出来给用户看，方便发现说岔了的地方。连接词不算。
+const STOP_WORDS = new Set(["然后", "接着", "接下来", "再", "先", "最后", "和", "跟", "与", "每", "各", "做", "一下", "再来", "之后", "其次"])
+
+function leftoverWords(raw, tokens) {
+  const mask = raw.split("")
+  for (const token of tokens) mask.fill("*", token.start, token.end)
+  const chunks = mask
+    .join("")
+    .split(/[^\u4e00-\u9fa5]+/)
+    .filter((word) => /[\u4e00-\u9fa5]/.test(word) && word.length >= 2 && !STOP_WORDS.has(word))
+  const unknown = []
+  for (const word of chunks) {
+    if (!unknown.includes(word)) unknown.push(word)
+    if (unknown.length >= 4) break
+  }
+  return unknown
+}

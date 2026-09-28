@@ -1,0 +1,55 @@
+.gate.screen {
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+.gate h1 {
+  font-size: 40px;
+  font-weight: 700;
+}
+
+.gate-names {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.gate-form {
+  flex: 1;
+}
+
+.gate-spacer {
+  flex: 1;
+  min-height: 12px;
+}
+
+.gate .name-btn {
+  width: 100%;
+  min-height: 56px;
+  text-align: left;
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.gate .name-btn:active {
+  background: #efe7d8;
+}
+
+.gate .field input {
+  font-size: 20px;
+}
+
+.gate .dock {
+  background: #f6f1e7;
+}
+
+.gate .dock .primary {
+  width: 100%;
+  min-height: 56px;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.gate button {
+  touch-action: manipulation;
+}
