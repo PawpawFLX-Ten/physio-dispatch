@@ -21,7 +21,16 @@ if [[ -z "$NODE_BIN" ]]; then
   exit 1
 fi
 
+# systemd 的 ExecStart/WorkingDirectory 按空格切参数：路径里的空格必须转义，
+# 否则「Vibe Coding Projects」这类目录会让服务 203/EXEC 起不来。
+function systemd_escape() {
+  printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/ /\\x20/g'
+}
+
 mkdir -p "$UNIT_DIR"
+ESCAPED_ROOT="$(systemd_escape "$ROOT")"
+# node 可能装在 nvm / 用户目录里，不在 systemd 默认 PATH：把它所在的 bin 目录带上。
+NODE_BIN_DIR="$(dirname "$NODE_BIN")"
 cat >"$UNIT_PATH" <<EOF
 [Unit]
 Description=治疗室派工（局域网 Node 服务）
@@ -30,12 +39,14 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=$ROOT
+# 不设 WorkingDirectory：它不吃 \x20 转义，带空格的路径会 200/CHDIR；
+# start-clinic.sh 自己会 cd 到仓库根目录。
 Environment=PORT=$PORT
 Environment=HOST=0.0.0.0
+Environment=PATH=$NODE_BIN_DIR:/usr/local/bin:/usr/bin:/bin
 # 可选机外备份目录，例如 U 盘或网盘同步夹：
 # Environment=BACKUP_MIRROR_DIR=/path/to/mirror
-ExecStart=$ROOT/scripts/start-clinic.sh
+ExecStart=$ESCAPED_ROOT/scripts/start-clinic.sh
 Restart=on-failure
 RestartSec=5
 

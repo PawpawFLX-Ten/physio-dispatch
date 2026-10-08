@@ -92,19 +92,13 @@ TLS_KEY=data/server.key TLS_CERT=data/server.crt npm start
 
 ## 浏览器 UI 回归（可选）
 
-默认 `npm test` 只跑 Node 单测，不含浏览器。需要本机已开开发服务，并用支持 BiDi 的浏览器（默认连 `ws://127.0.0.1:9222/session`）：
+`npm run test:ui` 会自己起一套一次性环境：打包前端、临时数据目录、独立端口（默认 8178），跑完即删。不碰 `data/` 里的真实档案，也不需要另开开发服务或浏览器：
 
 ```bash
-# 终端 1：临时数据目录起开发服务
-DATA_DIR=$(mktemp -d) npm run dev
-
-# 另开带远程调试的 Chromium / Chrome，例如：
-# chromium --remote-debugging-port=9222
-
 npm run test:ui
 ```
 
-环境变量：`BIDI`（BiDi WebSocket）、`CLINIC_DATA`（校验用的 clinic.json 路径）。跑不起来通常是浏览器 BiDi 未开或开发服务未在 5173。
+前提是本机有 Chromium（Playwright 缓存或系统浏览器均可，可用 `CHROME_PATH` 指定路径）。换端口用 `E2E_PORT`，改完代码想跳过重新打包用 `SKIP_BUILD=1`。
 
 ## 模型和图标
 
