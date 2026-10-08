@@ -52,7 +52,7 @@ test("shoulder can also be a work item after the chief is set", () => {
 })
 
 test("unrecognized words are reported back", () => {
-  const parsed = parseQuickOrder("左膝，肱二头肌和三角肌前束按摩")
+  const parsed = parseQuickOrder("左膝，腹横肌和三角肌前束按摩")
   assert.equal(parsed.chief.targetId, "knee")
   assert.equal(parsed.items.length, 0)
   assert.equal(parsed.unknown.length >= 1, true)
@@ -73,4 +73,21 @@ test("erector spinae parses into its own work item", () => {
   assert.equal(parsed.chief.targetId, "lumbar")
   assert.equal(parsed.items[0].targetId, "erector-spinae")
   assert.equal(parsed.items[0].technique, "release")
+})
+
+test("new arm and trunk muscles parse", () => {
+  const parsed = parseQuickOrder("左肩 肱二头肌按摩8分钟 然后三头肌松解，胸大肌按摩5分钟")
+  assert.equal(parsed.chief.targetId, "shoulder")
+  assert.equal(parsed.chief.side, "left")
+  assert.deepEqual(
+    parsed.items.map((item) => item.targetId),
+    ["biceps-brachii", "triceps-brachii", "pectoralis-major"],
+  )
+  assert.equal(parsed.items[0].side, "left")
+})
+
+test("forearm groups parse", () => {
+  const parsed = parseQuickOrder("右肘 前臂伸肌群器械3组10次")
+  assert.equal(parsed.items[0].targetId, "forearm-extensors")
+  assert.equal(parsed.items[0].technique, "equipment")
 })

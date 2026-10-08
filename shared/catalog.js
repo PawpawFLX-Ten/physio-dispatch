@@ -48,6 +48,15 @@ export const TARGETS = [
   { id: "teres-minor", name: "小圆肌", kind: "muscle" },
   { id: "teres-major", name: "大圆肌", kind: "muscle" },
   { id: "scm", name: "胸锁乳突肌", kind: "muscle" },
+  // 手臂与躯干补充（BodyParts3D）
+  { id: "pectoralis-major", name: "胸大肌", kind: "muscle" },
+  { id: "pectoralis-minor", name: "胸小肌", kind: "muscle" },
+  { id: "obliquus-externus", name: "腹外斜肌", kind: "muscle" },
+  { id: "biceps-brachii", name: "肱二头肌", kind: "muscle" },
+  { id: "triceps-brachii", name: "肱三头肌", kind: "muscle" },
+  { id: "brachioradialis", name: "肱桡肌", kind: "muscle" },
+  { id: "forearm-extensors", name: "前臂伸肌群", kind: "muscle" },
+  { id: "forearm-flexors", name: "前臂屈肌群", kind: "muscle" },
 ]
 
 export function targetById(id) {

@@ -13,6 +13,8 @@ export const BODY_FILES = [
   "supplement-hip-pelvis-muscle.glb",
   "supplement-shoulder-muscle.glb",
   "supplement-spine-trunk-muscle-erector-spinae.glb",
+  "supplement-arm-muscle.glb",
+  "supplement-trunk-muscle.glb",
 ]
 
 export const BODY_CAMERA = {
@@ -78,6 +80,15 @@ const TARGET_BY_SLUG = {
   subscapularis: "subscapularis",
   "teres-minor": "teres-minor",
   "teres-major": "teres-major",
+  // 手臂与躯干补充：节点名里直接写最终 slug（scripts/build-body-supplements.mjs）
+  "biceps-brachii": "biceps-brachii",
+  "triceps-brachii": "triceps-brachii",
+  brachioradialis: "brachioradialis",
+  "forearm-extensors": "forearm-extensors",
+  "forearm-flexors": "forearm-flexors",
+  "pectoralis-major": "pectoralis-major",
+  "pectoralis-minor": "pectoralis-minor",
+  "obliquus-externus": "obliquus-externus",
 }
 
 // 竖脊肌一直延伸到颈根：靠下的两段贴着腰椎算「腰」，其余胸段是竖脊肌下手项。
