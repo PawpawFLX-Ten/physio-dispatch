@@ -1,5 +1,6 @@
 // 数据层的纯函数和公共小工具：不碰 this、不碰文件。
 import crypto from "node:crypto"
+import { DIRECTIONS, TECHNIQUES, defaultDose } from "../shared/catalog.js"
 
 export function id() {
   return crypto.randomUUID()
@@ -17,7 +18,14 @@ export function todayKey(date = new Date()) {
 }
 
 export function emptyState() {
-  return { passphrase: null, staff: [], devices: {}, patients: [], templates: [], days: {} }
+  return {
+    staff: [],
+    devices: {},
+    patients: [],
+    templates: [],
+    days: {},
+    lastExportAt: null,
+  }
 }
 
 export function normalizeSide(side) {
@@ -39,6 +47,26 @@ export function fail(status, message) {
   const error = new Error(message)
   error.status = status
   throw error
+}
+
+/** 今日单条目版本：旧数据缺省按 0。 */
+export function entryVersion(entry) {
+  const n = Number(entry?.version)
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0
+}
+
+/** 带了期望版本才校验；不带则兼容旧客户端。 */
+export function assertExpectedVersion(entry, expectedVersion) {
+  if (expectedVersion === undefined || expectedVersion === null || expectedVersion === "") return
+  const expected = Number(expectedVersion)
+  if (!Number.isFinite(expected)) fail(400, "版本号不对")
+  if (entryVersion(entry) !== Math.floor(expected)) {
+    fail(409, "别人刚改过这张单，请重新拉取")
+  }
+}
+
+export function bumpEntryVersion(entry) {
+  entry.version = entryVersion(entry) + 1
 }
 
 function sanitizeStaff(person) {
@@ -87,6 +115,40 @@ function sanitizePatient(patient, staffIds) {
   return cleaned
 }
 
+// 日条目内部（导入路径用）：数组字段补齐；认不出的手法/方向换成默认；派工只留名单里的人。
+function sanitizeDayEntry(entry, staffIds) {
+  return {
+    id: entry.id,
+    patientId: entry.patientId,
+    conditionIds: (Array.isArray(entry.conditionIds) ? entry.conditionIds : []).filter(
+      (conditionId) => typeof conditionId === "string",
+    ),
+    focusConditionId: typeof entry.focusConditionId === "string" ? entry.focusConditionId : null,
+    chiefSiteId: typeof entry.chiefSiteId === "string" ? entry.chiefSiteId : null,
+    chiefSide: normalizeSide(entry.chiefSide),
+    version: entryVersion(entry),
+    items: (Array.isArray(entry.items) ? entry.items : [])
+      .filter((item) => item && typeof item === "object" && typeof item.targetId === "string" && item.targetId)
+      .map((item) => {
+        const technique = TECHNIQUES.some((row) => row.id === item.technique) ? item.technique : "massage"
+        const direction = DIRECTIONS.some((row) => row.id === item.direction) ? item.direction : "along"
+        return {
+          id: typeof item.id === "string" && item.id ? item.id : id(),
+          conditionId: typeof item.conditionId === "string" ? item.conditionId : null,
+          sourceItemId: typeof item.sourceItemId === "string" ? item.sourceItemId : null,
+          targetId: item.targetId,
+          side: normalizeSide(item.side),
+          technique,
+          direction,
+          dose: item.dose && typeof item.dose === "object" ? structuredClone(item.dose) : defaultDose(technique),
+          assigneeId: typeof item.assigneeId === "string" && staffIds.has(item.assigneeId) ? item.assigneeId : null,
+          done: Boolean(item.done),
+          completedBy: typeof item.completedBy === "string" ? item.completedBy : null,
+        }
+      }),
+  }
+}
+
 export function sanitizeState(data) {
   if (!data || typeof data !== "object" || Array.isArray(data)) fail(400, "这份文件不是治疗室数据")
   const staff = (Array.isArray(data.staff) ? data.staff : []).map(sanitizeStaff).filter(Boolean)
@@ -119,16 +181,19 @@ export function sanitizeState(data) {
     for (const [key, day] of Object.entries(data.days)) {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) continue
       if (!day || typeof day !== "object" || !Array.isArray(day.entries)) continue
-      // 孤儿天条目（病人已不在）丢掉，避免今日单投影整间屋子打不开。
+      // 孤儿天条目（病人已不在）丢掉；留下的把内部也扶正，
+      // 免得一条缺 items/conditionIds 的坏条目把整间屋子的 view() 打不开。
       days[key] = {
-        entries: day.entries.filter(
-          (entry) =>
-            entry &&
-            typeof entry === "object" &&
-            typeof entry.id === "string" &&
-            typeof entry.patientId === "string" &&
-            patientIds.has(entry.patientId),
-        ),
+        entries: day.entries
+          .filter(
+            (entry) =>
+              entry &&
+              typeof entry === "object" &&
+              typeof entry.id === "string" &&
+              typeof entry.patientId === "string" &&
+              patientIds.has(entry.patientId),
+          )
+          .map((entry) => sanitizeDayEntry(entry, staffIds)),
       }
     }
   }
@@ -140,6 +205,57 @@ export function sanitizeState(data) {
       else if (typeof staffId === "string" && staffIds.has(staffId)) devices[deviceId] = staffId
     }
   }
-  const passphrase = typeof data.passphrase === "string" && data.passphrase ? data.passphrase : null
-  return { passphrase, staff, devices, patients, templates, days }
+  const lastExportAt =
+    typeof data.lastExportAt === "string" && data.lastExportAt.trim() ? data.lastExportAt.trim() : null
+  return { staff, devices, patients, templates, days, lastExportAt }
+}
+
+// 磁盘读回来的数据只做「形状扶正」：不删还看得懂的历史，只补上会让读侧崩掉的洞
+// （数组字段缺失、条目/项不是对象），并顺手扔掉已废弃的 passphrase 字段。
+// 跟导入用的 sanitizeState 分工：这里宁可保数据，那里宁可保干净。
+export function normalizeLoadedState(data) {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return null
+  if (!Array.isArray(data.staff) || !Array.isArray(data.patients)) return null
+  const days = {}
+  if (data.days && typeof data.days === "object" && !Array.isArray(data.days)) {
+    for (const [key, day] of Object.entries(data.days)) {
+      days[key] = {
+        entries: (Array.isArray(day?.entries) ? day.entries : [])
+          .filter((entry) => entry && typeof entry === "object")
+          .map((entry) => ({
+            ...entry,
+            conditionIds: Array.isArray(entry.conditionIds)
+              ? entry.conditionIds.filter((row) => typeof row === "string")
+              : [],
+            items: Array.isArray(entry.items) ? entry.items.filter((row) => row && typeof row === "object") : [],
+          })),
+      }
+    }
+  }
+  return {
+    staff: data.staff.filter((row) => row && typeof row === "object"),
+    devices: data.devices && typeof data.devices === "object" && !Array.isArray(data.devices) ? data.devices : {},
+    patients: data.patients
+      .filter((patient) => patient && typeof patient === "object" && typeof patient.id === "string")
+      .map((patient) => ({
+        ...patient,
+        name: String(patient.name ?? ""),
+        conditions: (Array.isArray(patient.conditions) ? patient.conditions : [])
+          .filter((condition) => condition && typeof condition === "object")
+          .map((condition) => ({
+            ...condition,
+            items: Array.isArray(condition.items)
+              ? condition.items.filter((row) => row && typeof row === "object")
+              : [],
+          })),
+      })),
+    templates: (Array.isArray(data.templates) ? data.templates : [])
+      .filter((template) => template && typeof template === "object")
+      .map((template) => ({
+        ...template,
+        items: Array.isArray(template.items) ? template.items.filter((row) => row && typeof row === "object") : [],
+      })),
+    days,
+    lastExportAt: typeof data.lastExportAt === "string" ? data.lastExportAt : null,
+  }
 }

@@ -193,6 +193,37 @@ export function Today({ snap, onRefresh, onOpen }) {
     })
   }
 
+  function carryUnfinished(patient) {
+    run(async () => {
+      const result = await api.carryUnfinished(patient.id)
+      setOpen(false)
+      onOpen(result.entry.id)
+    })
+  }
+
+  function completeMine(entry) {
+    if (!entry.mineNextId) return
+    const label = entry.mineNextName || "当前项"
+    if (!window.confirm(`完成「${entry.patientName}」的${label}？未上云不算完成。`)) return
+    run(async () => {
+      try {
+        await api.patchItem(entry.id, entry.mineNextId, { done: true }, entry.version)
+      } catch (err) {
+        await onRefresh()
+        throw err
+      }
+      await onRefresh()
+    })
+  }
+
+  const exportAgeDays = (() => {
+    if (!snap.lastExportAt) return null
+    const at = Date.parse(snap.lastExportAt)
+    if (!Number.isFinite(at)) return null
+    return Math.floor((Date.now() - at) / (24 * 60 * 60 * 1000))
+  })()
+  const clinicUrl = typeof window !== "undefined" ? window.location.origin : ""
+
   const shown = Math.min(pull, PULL_LIMIT)
   const hint = refreshing ? "正在刷新" : pull > 56 ? "松开刷新" : "下拉刷新"
   const who = [snap.date, snap.me?.name].filter(Boolean).join(" · ")
@@ -316,21 +347,35 @@ export function Today({ snap, onRefresh, onOpen }) {
           ) : (
             <div className="today-list">
               {shownToday.map((entry) => (
-                <button
-                  key={entry.id}
-                  type="button"
-                  className="row-btn today-row"
-                  onClick={() => onOpen(todayByPatient.get(entry.patientId)?.id || entry.id)}
-                >
-                  <span className="today-name">{entry.patientName}</span>
-                  {entry.note ? <span className="today-note">{`⚠ ${entry.note}`}</span> : null}
-                  {entry.conditionNames?.length ? (
-                    <span className="today-conditions">{entry.conditionNames.join("、")}</span>
+                <div key={entry.id} className={mineOnly && entry.mineNextId ? "today-row-wrap" : undefined}>
+                  <button
+                    type="button"
+                    className="row-btn today-row"
+                    onClick={() => onOpen(todayByPatient.get(entry.patientId)?.id || entry.id)}
+                  >
+                    <span className="today-name">{entry.patientName}</span>
+                    {entry.note ? <span className="today-note">{`⚠ ${entry.note}`}</span> : null}
+                    {entry.conditionNames?.length ? (
+                      <span className="today-conditions">{entry.conditionNames.join("、")}</span>
+                    ) : null}
+                    {mineOnly && entry.mineNextName ? (
+                      <span className="today-conditions">{`当前：${entry.mineNextName}`}</span>
+                    ) : null}
+                    <span className="today-count">
+                      {mineOnly ? `${entry.mineDone}/${entry.mineTotal}` : `${entry.doneCount}/${entry.total}`}
+                    </span>
+                  </button>
+                  {mineOnly && entry.mineNextId ? (
+                    <button
+                      type="button"
+                      className="today-complete"
+                      disabled={pending}
+                      onClick={() => completeMine(entry)}
+                    >
+                      完成
+                    </button>
                   ) : null}
-                  <span className="today-count">
-                    {mineOnly ? `${entry.mineDone}/${entry.mineTotal}` : `${entry.doneCount}/${entry.total}`}
-                  </span>
-                </button>
+                </div>
               ))}
             </div>
           )}
@@ -492,6 +537,16 @@ export function Today({ snap, onRefresh, onOpen }) {
                       {patient.lastSummary ? (
                         <p className="patient-last-summary">{`上次做了：${patient.lastSummary}`}</p>
                       ) : null}
+                      {patient.hasUnfinishedPrev && patient.prevDay && !todayByPatient.has(patient.id) ? (
+                        <button
+                          type="button"
+                          className="today-repeat"
+                          disabled={pending}
+                          onClick={() => carryUnfinished(patient)}
+                        >
+                          {`把昨天未完成接进今天（${patient.prevDay.slice(5).replace("-", "月")}日）`}
+                        </button>
+                      ) : null}
                       {patient.prevDay && !todayByPatient.has(patient.id) ? (
                         <button
                           type="button"
@@ -543,6 +598,13 @@ export function Today({ snap, onRefresh, onOpen }) {
                 <h2 id="settings-title">设置</h2>
                 <p className="muted">关掉标签后仍会记住这台手机绑定的名字。</p>
                 <p className="error sheet-error">{error}</p>
+                {clinicUrl ? (
+                  <>
+                    <h3>本机地址</h3>
+                    <p className="muted">{clinicUrl}</p>
+                    <p className="muted">同一 Wi‑Fi 的手机用这个地址打开（以终端打印的局域网 IP 为准）。</p>
+                  </>
+                ) : null}
                 <h3>备份</h3>
                 <div className="today-template-buttons">
                   <button
@@ -553,6 +615,7 @@ export function Today({ snap, onRefresh, onOpen }) {
                       run(async () => {
                         const data = await api.exportClinic()
                         downloadExport(data)
+                        await onRefresh()
                       })
                     }
                   >
@@ -574,6 +637,14 @@ export function Today({ snap, onRefresh, onOpen }) {
                     onChange={onImportFile}
                   />
                 </div>
+                <p className="muted">
+                  {snap.lastExportAt
+                    ? `上次导出：${new Date(snap.lastExportAt).toLocaleString("zh-CN", { hour12: false })}`
+                    : "还没有导出过，建议每周拷一份到 U 盘或网盘。"}
+                </p>
+                {exportAgeDays != null && exportAgeDays >= 7 ? (
+                  <p className="error">已经超过 7 天没导出，建议现在拷一份机外备份。</p>
+                ) : null}
                 <p className="muted">导出会下载完整 JSON；导入会替换本机全部数据，请先确认。</p>
                 <h3>我是谁</h3>
                 <div className="patient-list">

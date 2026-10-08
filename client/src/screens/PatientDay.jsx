@@ -15,16 +15,24 @@ import {
 } from "@shared/catalog.js"
 import { matchesInitials } from "../pinyin.js"
 import { parseQuickOrder } from "@shared/quick-order.js"
+import { itemsOnSpot } from "@shared/body-marks.js"
 import { useBackLayer } from "../back-layer.js"
 import { BodyStage } from "./BodyStage.jsx"
 import "./patient.css"
 
 const blankNotice = { text: "", tone: "ok" }
-const pastMidnightNotice = { text: "已经是新的一天", tone: "error" }
+const pastMidnightNotice = {
+  text: "已经是新的一天。回到今日单后，可在加入病人里把昨天未完成接进今天。",
+  tone: "error",
+}
 const removePast = 72
 
 function isPastMidnightError(err) {
   return typeof err?.message === "string" && err.message.includes("过了零点")
+}
+
+function isConflictError(err) {
+  return err?.status === 409 || (typeof err?.message === "string" && err.message.includes("别人刚改过"))
 }
 
 function sameIds(left, right) {
@@ -68,11 +76,11 @@ function itemSnapshot(item) {
 }
 
 function itemLine(item) {
+  // 派给谁单独成钮，不塞进这一行说明。
   return [
     techniqueLabel(item.technique),
     directionLabel(item.direction),
     doseLabel(item.technique, item.dose),
-    item.assigneeName || "未派",
     item.done && item.completedByName ? `${item.completedByName}完成` : "",
   ]
     .filter(Boolean)
@@ -230,7 +238,7 @@ function ListPicker({ entry, pending, notice, query, onQuery, onPickSite, onPick
   )
 }
 
-function TreatmentRow({ item, index, current, dragging, offsetY, swipeX, onToggle, onRowPointerDown, onHandlePointerDown }) {
+function TreatmentRow({ item, index, current, dragging, offsetY, swipeX, onToggle, onAssign, onRowPointerDown, onHandlePointerDown }) {
   const transform = dragging
     ? `translate3d(0, ${offsetY}px, 0)`
     : swipeX
@@ -258,6 +266,16 @@ function TreatmentRow({ item, index, current, dragging, offsetY, swipeX, onToggl
         </div>
         <button
           type="button"
+          className={item.assigneeId ? "patient-who" : "patient-who is-empty"}
+          data-stop=""
+          aria-label={item.assigneeName ? `派给 ${item.assigneeName}` : "派给谁"}
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={onAssign}
+        >
+          {item.assigneeName || "未派"}
+        </button>
+        <button
+          type="button"
           className={item.done ? "patient-done is-done" : "patient-done"}
           data-stop=""
           aria-pressed={item.done}
@@ -281,7 +299,7 @@ function TreatmentRow({ item, index, current, dragging, offsetY, swipeX, onToggl
   )
 }
 
-function PlanList({ items, currentIndex, onToggle, onOpen, onRemove, onReorder }) {
+function PlanList({ items, currentIndex, onToggle, onAssign, onOpen, onRemove, onReorder }) {
   const [preview, setPreview] = useState(null)
   const [draggingId, setDraggingId] = useState(null)
   const [dragY, setDragY] = useState(0)
@@ -489,6 +507,7 @@ function PlanList({ items, currentIndex, onToggle, onOpen, onRemove, onReorder }
           offsetY={draggingId === item.id ? dragY : 0}
           swipeX={swipeOffset?.id === item.id ? swipeOffset.dx : 0}
           onToggle={() => onToggle(item)}
+          onAssign={() => onAssign(item)}
           onRowPointerDown={(event) => startSwipe(event, item.id)}
           onHandlePointerDown={(event) => startDrag(event, item.id)}
         />
@@ -523,6 +542,7 @@ export function PatientDay({ entryId, pulse, onBack }) {
   const [pastMidnight, setPastMidnight] = useState(false)
   const [reselecting, setReselecting] = useState(false)
   const [assignOpen, setAssignOpen] = useState(false)
+  const [itemAssignId, setItemAssignId] = useState(null)
   const [activeItemId, setActiveItemId] = useState(null)
   const [copyOpen, setCopyOpen] = useState(false)
   const [copyMode, setCopyMode] = useState("archive")
@@ -544,20 +564,24 @@ export function PatientDay({ entryId, pulse, onBack }) {
   const [renameText, setRenameText] = useState("")
   const [manageOpen, setManageOpen] = useState(false)
   const [moreOpen, setMoreOpen] = useState(false)
+  const [bodyGroup, setBodyGroup] = useState(null)
   const pendingRef = useRef(false)
   const mountedRef = useRef(true)
   const backLock = useRef(false)
   const tailRef = useRef(Promise.resolve())
   const queueDepthRef = useRef(0)
   const staleRef = useRef(false)
+  const entryVersionRef = useRef(0)
   const onSelectRef = useRef(() => {})
-  const stableSelect = useCallback((targetId) => onSelectRef.current(targetId), [])
+  const stableSelect = useCallback((targetId, side) => onSelectRef.current(targetId, side), [])
 
   // 返回键分层：重选模式 → 弹层 → 病人页本体（含「记回病症」提醒），按一次关一层。
   const anySheet = Boolean(
     leaveAsk ||
       assignOpen ||
+      itemAssignId ||
       activeItemId ||
+      bodyGroup ||
       copyOpen ||
       saveTmplOpen ||
       applyTmplOpen ||
@@ -577,12 +601,19 @@ export function PatientDay({ entryId, pulse, onBack }) {
 
   const applyResult = useCallback((result) => {
     if (!result) return
-    if (result.entry) setEntry(result.entry)
+    if (result.entry) {
+      setEntry(result.entry)
+      entryVersionRef.current = Number(result.entry.version) || 0
+    }
     if (result.staff) setStaff(result.staff)
     if (result.patients) setPatients(result.patients)
     if (result.templates) setTemplates(result.templates)
     if (Object.prototype.hasOwnProperty.call(result, "me")) setMe(result.me)
   }, [])
+
+  function withVersion(call) {
+    return call(entryVersionRef.current)
+  }
 
   useEffect(() => {
     mountedRef.current = true
@@ -596,7 +627,9 @@ export function PatientDay({ entryId, pulse, onBack }) {
     setLeaveAsk(false)
     setReselecting(false)
     setAssignOpen(false)
+    setItemAssignId(null)
     setActiveItemId(null)
+    setBodyGroup(null)
     setCopyOpen(false)
     setSaveTmplOpen(false)
     setApplyTmplOpen(false)
@@ -718,8 +751,11 @@ export function PatientDay({ entryId, pulse, onBack }) {
           setNotice(pastMidnightNotice)
           return false
         }
-        setNotice({ text: options.fail || err?.message || "未能保存", tone: "error" })
-        // 改单失败（尤其重排 400）后拉回服务器清单，别停在过期预览上。
+        const failText = isConflictError(err)
+          ? err.message || "别人刚改过这张单，请重新拉取"
+          : options.fail || err?.message || "未能保存"
+        setNotice({ text: failText, tone: "error" })
+        // 改单失败（尤其重排/冲突）后拉回服务器清单，别停在过期预览上。
         await reloadEntryKeepNotice()
         return false
       } finally {
@@ -752,8 +788,10 @@ export function PatientDay({ entryId, pulse, onBack }) {
         applyResult(latest)
         if (latest.entry?.diverged) {
           setAssignOpen(false)
+          setItemAssignId(null)
           setCopyOpen(false)
           setActiveItemId(null)
+          setBodyGroup(null)
           setMoreOpen(false)
           setSaveTmplOpen(false)
           setApplyTmplOpen(false)
@@ -839,6 +877,13 @@ export function PatientDay({ entryId, pulse, onBack }) {
         setNotice({ text: "先点要治的地方", tone: "error" })
         return
       }
+      const existing = itemsOnSpot(entry.items, targetId, pickedSide)
+      if (existing.length) {
+        setNotice(blankNotice)
+        closeSheets()
+        setBodyGroup({ targetId, side: pickedSide })
+        return
+      }
       await mutate(() => api.addItem(entryId, targetId, pickedSide))
     }
   }
@@ -850,7 +895,9 @@ export function PatientDay({ entryId, pulse, onBack }) {
 
   function closeSheets() {
     setAssignOpen(false)
+    setItemAssignId(null)
     setActiveItemId(null)
+    setBodyGroup(null)
     setCopyOpen(false)
     setSaveTmplOpen(false)
     setApplyTmplOpen(false)
@@ -1067,12 +1114,18 @@ export function PatientDay({ entryId, pulse, onBack }) {
   }
 
   const activeItem = entry.items?.find((item) => item.id === activeItemId) || null
+  const assignItem = entry.items?.find((item) => item.id === itemAssignId) || null
+  const bodyGroupItems = bodyGroup
+    ? itemsOnSpot(entry.items, bodyGroup.targetId, bodyGroup.side)
+    : []
   const entryConditions = (entry.conditionIds || [])
     .map((id) => entry.conditions?.find((condition) => condition.id === id))
     .filter(Boolean)
   const names = conditionText(entry)
   const covering =
     assignOpen ||
+    Boolean(assignItem) ||
+    Boolean(bodyGroup) ||
     copyOpen ||
     saveTmplOpen ||
     applyTmplOpen ||
@@ -1144,14 +1197,25 @@ export function PatientDay({ entryId, pulse, onBack }) {
         <PlanList
           items={entry.items || []}
           currentIndex={firstUndone}
-          onToggle={(item) => mutate(() => api.patchItem(entryId, item.id, { done: !item.done }), { fail: "未能保存" })}
+          onToggle={(item) =>
+            mutate(() => withVersion((v) => api.patchItem(entryId, item.id, { done: !item.done }, v)), {
+              fail: "未能保存",
+            })
+          }
+          onAssign={(item) => {
+            setNotice(blankNotice)
+            closeSheets()
+            setItemAssignId(item.id)
+          }}
           onOpen={(itemId) => {
             setNotice(blankNotice)
             closeSheets()
             setActiveItemId(itemId)
           }}
           onRemove={removeWithUndo}
-          onReorder={(orderedIds) => mutate(() => api.reorder(entryId, orderedIds), { fail: "未能保存" })}
+          onReorder={(orderedIds) =>
+            mutate(() => withVersion((v) => api.reorder(entryId, orderedIds, v)), { fail: "未能保存" })
+          }
         />
         {undo ? (
           <div className="patient-undo" role="status">
@@ -1162,6 +1226,20 @@ export function PatientDay({ entryId, pulse, onBack }) {
           </div>
         ) : null}
         <div className="patient-actions">
+          {(entry.items?.length || 0) === 0 ? (
+            <button
+              type="button"
+              className="primary"
+              disabled={pending}
+              onClick={() => {
+                setNotice(blankNotice)
+                closeSheets()
+                setListOpen(true)
+              }}
+            >
+              说一句
+            </button>
+          ) : null}
           <button
             type="button"
             className="secondary"
@@ -1174,6 +1252,20 @@ export function PatientDay({ entryId, pulse, onBack }) {
           >
             名单加项
           </button>
+          {entry.items?.length > 0 ? (
+            <button
+              type="button"
+              className="secondary"
+              disabled={pending}
+              onClick={() => {
+                setNotice(blankNotice)
+                closeSheets()
+                setAssignOpen(true)
+              }}
+            >
+              全部派给
+            </button>
+          ) : null}
           <button
             type="button"
             className="secondary"
@@ -1192,18 +1284,6 @@ export function PatientDay({ entryId, pulse, onBack }) {
       {moreOpen && !leaveAsk ? (
         <Sheet title="更多" onClose={() => setMoreOpen(false)}>
           <Notice notice={notice} />
-          {entry.items?.length > 0 ? (
-            <button
-              type="button"
-              className="secondary"
-              onClick={() => {
-                setMoreOpen(false)
-                setAssignOpen(true)
-              }}
-            >
-              全部派给
-            </button>
-          ) : null}
           {entry.items?.length > 0 ? (
             <button
               type="button"
@@ -1342,7 +1422,10 @@ export function PatientDay({ entryId, pulse, onBack }) {
                 className="patient-choice is-last"
                 disabled={pending}
                 onClick={async () => {
-                  const ok = await mutate(() => api.assignAll(entryId, entry.lastAssigneeId), { fail: "未能保存" })
+                  const ok = await mutate(
+                    () => withVersion((v) => api.assignAll(entryId, entry.lastAssigneeId, v)),
+                    { fail: "未能保存" },
+                  )
                   if (ok) setAssignOpen(false)
                 }}
               >
@@ -1358,7 +1441,9 @@ export function PatientDay({ entryId, pulse, onBack }) {
                 className="patient-choice"
                 disabled={pending}
                 onClick={async () => {
-                  const ok = await mutate(() => api.assignAll(entryId, person.id), { fail: "未能保存" })
+                  const ok = await mutate(() => withVersion((v) => api.assignAll(entryId, person.id, v)), {
+                    fail: "未能保存",
+                  })
                   if (ok) setAssignOpen(false)
                 }}
               >
@@ -1366,6 +1451,95 @@ export function PatientDay({ entryId, pulse, onBack }) {
               </button>
             ))}
           </div>
+        </Sheet>
+      ) : null}
+
+      {assignItem && !leaveAsk ? (
+        <Sheet title="派给谁" onClose={() => setItemAssignId(null)}>
+          <Notice notice={notice} />
+          <p className="patient-label">{targetTitle(assignItem.targetId, assignItem.side)}</p>
+          <div className="patient-stack">
+            {staff.map((person) => (
+              <button
+                type="button"
+                key={person.id}
+                className={assignItem.assigneeId === person.id ? "patient-choice is-on" : "patient-choice"}
+                aria-pressed={assignItem.assigneeId === person.id}
+                disabled={pending}
+                onClick={async () => {
+                  if (assignItem.assigneeId === person.id) {
+                    setItemAssignId(null)
+                    return
+                  }
+                  const ok = await mutate(
+                    () => withVersion((v) => api.patchItem(entryId, assignItem.id, { assigneeId: person.id }, v)),
+                    { fail: "未能保存" },
+                  )
+                  if (ok) setItemAssignId(null)
+                }}
+              >
+                {personLabel(person)}
+              </button>
+            ))}
+          </div>
+        </Sheet>
+      ) : null}
+
+      {bodyGroup && !assignItem && !leaveAsk ? (
+        <Sheet
+          title={targetTitle(bodyGroup.targetId, bodyGroup.side)}
+          onClose={() => setBodyGroup(null)}
+        >
+          <Notice notice={notice} />
+          <div className="patient-stack">
+            {bodyGroupItems.map((item, index) => (
+              <div key={item.id} className={item.done ? "patient-body-item is-done" : "patient-body-item"}>
+                <button
+                  type="button"
+                  className="patient-body-item-main"
+                  disabled={pending}
+                  onClick={() => {
+                    setActiveItemId(item.id)
+                    setBodyGroup(null)
+                  }}
+                >
+                  <span className="patient-body-item-title">
+                    {`${index + 1}. ${techniqueLabel(item.technique)} · ${directionLabel(item.direction)}`}
+                  </span>
+                  <span className="patient-body-item-meta">
+                    {[doseLabel(item.technique, item.dose), item.done ? "已完成" : ""]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className={item.assigneeId ? "patient-who" : "patient-who is-empty"}
+                  disabled={pending}
+                  aria-label={item.assigneeName ? `派给 ${item.assigneeName}` : "派给谁"}
+                  onClick={() => setItemAssignId(item.id)}
+                >
+                  {item.assigneeName || "未派"}
+                </button>
+              </div>
+            ))}
+          </div>
+          <button
+            type="button"
+            className="primary"
+            disabled={pending}
+            onClick={() =>
+              mutate(() => api.addItem(entryId, bodyGroup.targetId, bodyGroup.side), {
+                success: "已再加一项",
+                fail: "未能保存",
+              })
+            }
+          >
+            再加一项
+          </button>
+          <button type="button" className="secondary" onClick={() => setBodyGroup(null)}>
+            收起
+          </button>
         </Sheet>
       ) : null}
 
@@ -1426,7 +1600,10 @@ export function PatientDay({ entryId, pulse, onBack }) {
                 disabled={pending}
                 onClick={() => {
                   if (activeItem.technique === technique.id) return
-                  mutate(() => api.patchItem(entryId, activeItem.id, { technique: technique.id }), { fail: "未能保存" })
+                  mutate(
+                    () => withVersion((v) => api.patchItem(entryId, activeItem.id, { technique: technique.id }, v)),
+                    { fail: "未能保存" },
+                  )
                 }}
               >
                 {technique.label}
@@ -1444,7 +1621,10 @@ export function PatientDay({ entryId, pulse, onBack }) {
                 disabled={pending}
                 onClick={() => {
                   if (activeItem.direction === direction.id) return
-                  mutate(() => api.patchItem(entryId, activeItem.id, { direction: direction.id }), { fail: "未能保存" })
+                  mutate(
+                    () => withVersion((v) => api.patchItem(entryId, activeItem.id, { direction: direction.id }, v)),
+                    { fail: "未能保存" },
+                  )
                 }}
               >
                 {direction.label}
@@ -1466,7 +1646,13 @@ export function PatientDay({ entryId, pulse, onBack }) {
                     const reps = numeric(activeItem.dose?.reps, 1)
                     const next = Math.max(1, sets + delta)
                     if (next === sets) return
-                    mutate(() => api.patchItem(entryId, activeItem.id, { dose: { sets: next, reps } }), { fail: "未能保存" })
+                    mutate(
+                      () =>
+                        withVersion((v) =>
+                          api.patchItem(entryId, activeItem.id, { dose: { sets: next, reps } }, v),
+                        ),
+                      { fail: "未能保存" },
+                    )
                   }}
                 />
                 <DoseControl
@@ -1480,7 +1666,13 @@ export function PatientDay({ entryId, pulse, onBack }) {
                     const reps = numeric(activeItem.dose?.reps, 1)
                     const next = Math.max(1, reps + delta)
                     if (next === reps) return
-                    mutate(() => api.patchItem(entryId, activeItem.id, { dose: { sets, reps: next } }), { fail: "未能保存" })
+                    mutate(
+                      () =>
+                        withVersion((v) =>
+                          api.patchItem(entryId, activeItem.id, { dose: { sets, reps: next } }, v),
+                        ),
+                      { fail: "未能保存" },
+                    )
                   }}
                 />
               </>
@@ -1495,7 +1687,10 @@ export function PatientDay({ entryId, pulse, onBack }) {
                   const minutes = numeric(activeItem.dose?.minutes, 1)
                   const next = Math.max(1, minutes + delta)
                   if (next === minutes) return
-                  mutate(() => api.patchItem(entryId, activeItem.id, { dose: { minutes: next } }), { fail: "未能保存" })
+                  mutate(
+                    () => withVersion((v) => api.patchItem(entryId, activeItem.id, { dose: { minutes: next } }, v)),
+                    { fail: "未能保存" },
+                  )
                 }}
               />
             )}
@@ -1511,7 +1706,10 @@ export function PatientDay({ entryId, pulse, onBack }) {
                 disabled={pending}
                 onClick={() => {
                   if (activeItem.assigneeId === person.id) return
-                  mutate(() => api.patchItem(entryId, activeItem.id, { assigneeId: person.id }), { fail: "未能保存" })
+                  mutate(
+                    () => withVersion((v) => api.patchItem(entryId, activeItem.id, { assigneeId: person.id }, v)),
+                    { fail: "未能保存" },
+                  )
                 }}
               >
                 {personLabel(person)}

@@ -22,11 +22,20 @@ import { hasSides, targetById, TARGETS } from "@shared/catalog.js"
 import { BODY_CAMERA, BODY_FILES, meshSlug, resolveMesh } from "@shared/body-map.js"
 import { BODY_VERSION } from "@shared/body-assets.js"
 import { chooseBodyHit } from "@shared/body-pick.js"
+import {
+  buildMarkState,
+  markKey,
+  ordersFor,
+  resolvePaintRole,
+} from "@shared/body-marks.js"
 import "./body.css"
 
 const DRAG_PX = 8
-const CHIEF = 0xc45c26
-const MARKED = 0x1f6b4a
+// 要治的地方：偏暖、比骨表亮一档，仍比下手绿淡。
+const CHIEF = 0xe08a4a
+// 下手：能看出左右，但不刺眼。
+const WORK = 0x3d8f6a
+const WORK_DONE = 0x8fad9c
 const BONE = 0xeadccb
 const MUSCLE = 0xa24b38
 const NODE = 0x2f5f73
@@ -39,10 +48,6 @@ function sideOf(point, targetId) {
   return point.x >= 0 ? "right" : "left"
 }
 
-function markKey(targetId, side) {
-  return `${targetId}:${side || "mid"}`
-}
-
 function restingColor(targetId, tissue) {
   const target = targetById(targetId)
   if (!target) return tissue === "bone" ? BONE : MUSCLE
@@ -50,6 +55,13 @@ function restingColor(targetId, tissue) {
   if (target.kind === "site" && tissue === "bone") return 0xd7a07a
   if (tissue === "bone") return BONE
   return MUSCLE
+}
+
+function hexForRole(role, baseHex) {
+  if (role === "chief") return CHIEF
+  if (role === "work") return WORK
+  if (role === "workDone") return WORK_DONE
+  return baseHex
 }
 
 function roundPoint(vector) {
@@ -365,36 +377,25 @@ export function BodyStage({ chiefSiteId, chiefSide, items, reselecting, onSelect
         labelAnchors.set(key, label)
       }
 
-      function keysForItem(item) {
-        if (item.side) return [markKey(item.targetId, item.side)]
-        return [markKey(item.targetId, "left"), markKey(item.targetId, "right"), markKey(item.targetId, null)]
-      }
-
       function applyMarks() {
         const current = propsRef.current
-        const marks = new Map()
-        const list = Array.isArray(current.items) ? current.items : []
-        list.forEach((item, index) => {
-          if (!item?.targetId) return
-          for (const key of keysForItem(item)) {
-            const rows = marks.get(key) || []
-            rows.push(index + 1)
-            marks.set(key, rows)
-          }
+        const state = buildMarkState({
+          chiefSiteId: current.chiefSiteId,
+          chiefSide: current.chiefSide,
+          items: current.items,
         })
         for (const entry of markers) {
-          const key = markKey(entry.id, entry.side)
-          const order = marks.get(key)
-          const isChief =
-            entry.id === current.chiefSiteId &&
-            (!current.chiefSide || !entry.side || entry.side === current.chiefSide)
-          if (isChief) entry.mesh.material.color.setHex(CHIEF)
-          else if (order?.length) entry.mesh.material.color.setHex(MARKED)
-          else entry.mesh.material.color.setHex(entry.base)
-          const label = labelAnchors.get(key)
+          const role = resolvePaintRole(entry.id, entry.side, state)
+          entry.mesh.material.color.setHex(hexForRole(role, entry.base))
+          const order = ordersFor(entry.id, entry.side, state)
+          const label = labelAnchors.get(markKey(entry.id, entry.side))
           if (!label) continue
-          label.visible = Boolean(order?.length)
-          if (order?.length) label.element.textContent = order.join(" ")
+          label.visible = order.length > 0
+          if (order.length) {
+            label.element.textContent = order.join(" ")
+            label.element.className =
+              role === "workDone" ? "body-stage-label is-done" : "body-stage-label"
+          }
         }
         invalidate()
       }

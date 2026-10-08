@@ -1,6 +1,6 @@
 // 读侧：把 state 投影成各页面要的样子。
 import { targetById, targetTitle } from "../shared/catalog.js"
-import { fail, todayKey, workSignature } from "./helpers.js"
+import { entryVersion, fail, todayKey, workSignature } from "./helpers.js"
 
 export const viewMethods = {
   view(deviceId) {
@@ -19,6 +19,7 @@ export const viewMethods = {
       todayByStaff: this.todayByStaff(),
       patients: this.patientList(),
       templates: this.templateList(),
+      lastExportAt: typeof this.state.lastExportAt === "string" ? this.state.lastExportAt : null,
     }
   },
 
@@ -36,11 +37,13 @@ export const viewMethods = {
     return [...this.state.patients]
       .map((patient) => {
         let lastSummary = ""
+        let hasUnfinishedPrev = false
         const prevDay = prevDays.get(patient.id)
         if (prevDay) {
           const entry = this.state.days[prevDay].entries.find((row) => row.patientId === patient.id)
           if (entry) {
             lastSummary = entry.items.map((item) => targetTitle(item.targetId, item.side || null)).join("、")
+            hasUnfinishedPrev = entry.items.some((item) => !item.done)
           }
         }
         return {
@@ -56,6 +59,7 @@ export const viewMethods = {
           lastDay: lastDays.get(patient.id) || null,
           prevDay: prevDay || null,
           lastSummary,
+          hasUnfinishedPrev,
           note: patient.note || "",
         }
       })
@@ -101,6 +105,12 @@ export const viewMethods = {
     return map
   },
 
+  // 读侧拿今天：只看不建，免得每个只是开过 App 的日子都在档案里留下一个空天。
+  todayRecord() {
+    return this.state.days[todayKey()] || { entries: [] }
+  },
+
+  // 写侧拿今天：没有就建。
   day() {
     const key = todayKey()
     if (!this.state.days[key]) this.state.days[key] = { entries: [] }
@@ -109,7 +119,7 @@ export const viewMethods = {
 
   todayList(meId) {
     // 跳过「条目还在、病人没了」的孤儿，避免整间屋子 view() 打不开。
-    return this.day()
+    return this.todayRecord()
       .entries.map((entry) => this.entrySummary(entry, meId))
       .filter(Boolean)
   },
@@ -119,6 +129,7 @@ export const viewMethods = {
     if (!patient) return null
     const done = entry.items.filter((item) => item.done).length
     const mine = meId ? entry.items.filter((item) => item.assigneeId === meId) : []
+    const mineNext = mine.find((item) => !item.done) || null
     return {
       id: entry.id,
       patientId: patient.id,
@@ -129,6 +140,9 @@ export const viewMethods = {
       total: entry.items.length,
       mineTotal: mine.length,
       mineDone: mine.filter((item) => item.done).length,
+      mineNextId: mineNext?.id || null,
+      mineNextName: mineNext ? targetTitle(mineNext.targetId, mineNext.side || null) : "",
+      version: entryVersion(entry),
       note: patient.note || "",
     }
   },
@@ -144,7 +158,7 @@ export const viewMethods = {
       }
       return groups.get(key)
     }
-    for (const entry of this.day().entries) {
+    for (const entry of this.todayRecord().entries) {
       const patient = this.state.patients.find((item) => item.id === entry.patientId)
       if (!patient) continue
       for (const item of entry.items) {
@@ -182,7 +196,7 @@ export const viewMethods = {
   },
 
   entryById(entryId) {
-    const entry = this.day().entries.find((item) => item.id === entryId)
+    const entry = this.todayRecord().entries.find((item) => item.id === entryId)
     if (entry) return entry
     const today = todayKey()
     for (const [key, day] of Object.entries(this.state.days)) {
@@ -236,6 +250,7 @@ export const viewMethods = {
         focusConditionId: entry.focusConditionId,
         history: this.visitHistory(patient.id),
         diverged: this.diverged(entry),
+        version: entryVersion(entry),
         items: entry.items.map((item) => this.presentItem(item)),
       },
     }

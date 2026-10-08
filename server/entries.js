@@ -7,7 +7,7 @@ import {
   targetById,
   targetTitle,
 } from "../shared/catalog.js"
-import { fail, id, normalizeSide } from "./helpers.js"
+import { assertExpectedVersion, bumpEntryVersion, fail, id, normalizeSide } from "./helpers.js"
 
 export const entryMethods = {
   createPatient({ deviceId, name, conditionName }) {
@@ -75,6 +75,7 @@ export const entryMethods = {
       focusConditionId: last.conditionIds[last.conditionIds.length - 1],
       chiefSiteId: last.chiefSiteId,
       chiefSide: last.chiefSide || null,
+      version: 0,
       items: last.items.map((item) => ({
         id: id(),
         conditionId: item.conditionId,
@@ -92,6 +93,50 @@ export const entryMethods = {
     this.day().entries.push(entry)
     this.save()
     this.audit(deviceId, "照上次的单", { 病人: patient.name, 上次: prevDay })
+    return this.entryView(deviceId, entry.id)
+  },
+
+  // 把昨天未完成接进今天：只带未完成项与派工，不做完的项原样拷成已完成。
+  carryUnfinished({ deviceId, patientId }) {
+    this.requireStaff(deviceId)
+    const patient = this.patient(patientId)
+    if (this.day().entries.some((entry) => entry.patientId === patientId)) {
+      fail(400, "这位今天已经在单上了")
+    }
+    const prevDays = this.patientLastDays(true)
+    const prevDay = prevDays.get(patientId)
+    if (!prevDay) fail(404, "这位还没来过，先按病症建")
+    const last = this.state.days[prevDay].entries.find((entry) => entry.patientId === patientId)
+    if (!last) fail(404, "找不到上次的那张单")
+    const open = (last.items || []).filter((item) => !item.done)
+    if (!open.length) fail(400, "昨天没有未完成的项")
+    const conditionIds = [...new Set(open.map((item) => item.conditionId).filter(Boolean))]
+    const ids = conditionIds.length ? conditionIds : [...last.conditionIds]
+    const entry = {
+      id: id(),
+      patientId,
+      conditionIds: ids,
+      focusConditionId: ids[ids.length - 1],
+      chiefSiteId: last.chiefSiteId,
+      chiefSide: last.chiefSide || null,
+      version: 0,
+      items: open.map((item) => ({
+        id: id(),
+        conditionId: item.conditionId,
+        sourceItemId: item.sourceItemId,
+        targetId: item.targetId,
+        side: item.side || null,
+        technique: item.technique,
+        direction: item.direction,
+        dose: structuredClone(item.dose),
+        assigneeId: item.assigneeId || null,
+        done: false,
+        completedBy: null,
+      })),
+    }
+    this.day().entries.push(entry)
+    this.save()
+    this.audit(deviceId, "接昨天未完成", { 病人: patient.name, 上次: prevDay, 项数: open.length })
     return this.entryView(deviceId, entry.id)
   },
 
@@ -227,6 +272,7 @@ export const entryMethods = {
       focusConditionId,
       chiefSiteId: first?.chiefSiteId || null,
       chiefSide: first?.chiefSide || null,
+      version: 0,
       items,
     }
   },
@@ -315,17 +361,23 @@ export const entryMethods = {
     return this.entryView(deviceId, entry.id)
   },
 
-  patchItem({ deviceId, entryId, itemId, patch }) {
+  patchItem({ deviceId, entryId, itemId, patch, expectedVersion }) {
     const staff = this.requireStaff(deviceId)
     const entry = this.entryById(entryId)
+    assertExpectedVersion(entry, expectedVersion)
     const item = entry.items.find((row) => row.id === itemId)
     if (!item) fail(404, "找不到这一项")
     if (patch.technique && patch.technique !== item.technique) {
+      if (!TECHNIQUES.some((row) => row.id === patch.technique)) fail(400, "手法不对")
       item.technique = patch.technique
       item.dose = defaultDose(patch.technique)
     }
-    if (patch.direction) item.direction = patch.direction
+    if (patch.direction) {
+      if (!DIRECTIONS.some((row) => row.id === patch.direction)) fail(400, "方向不对")
+      item.direction = patch.direction
+    }
     if (patch.assigneeId) {
+      if (!this.state.staff.some((row) => row.id === patch.assigneeId)) fail(404, "找不到这个人")
       item.assigneeId = patch.assigneeId
       const owner = this.patient(entry.patientId)
       owner.lastAssigneeId = patch.assigneeId
@@ -350,6 +402,7 @@ export const entryMethods = {
     } else if (patch.dose) {
       item.dose = { minutes: Math.max(1, Number(patch.dose.minutes ?? item.dose.minutes) || 1) }
     }
+    bumpEntryVersion(entry)
     this.save()
     this.audit(deviceId, "改一项", { 项: targetTitle(item.targetId, item.side || null), 改动: patch })
     return this.entryView(deviceId, entry.id)
@@ -406,9 +459,10 @@ export const entryMethods = {
     return this.entryView(deviceId, entry.id)
   },
 
-  reorder({ deviceId, entryId, orderedIds }) {
+  reorder({ deviceId, entryId, orderedIds, expectedVersion }) {
     this.requireStaff(deviceId)
     const entry = this.entryById(entryId)
+    assertExpectedVersion(entry, expectedVersion)
     const ids = Array.isArray(orderedIds) ? orderedIds : []
     if (new Set(ids).size !== ids.length) fail(400, "顺序有重复")
     const map = new Map(entry.items.map((item) => [item.id, item]))
@@ -416,20 +470,23 @@ export const entryMethods = {
       fail(400, "顺序不完整")
     }
     entry.items = ids.map((itemId) => map.get(itemId))
+    bumpEntryVersion(entry)
     this.save()
     this.audit(deviceId, "调整顺序")
     return this.entryView(deviceId, entry.id)
   },
 
-  assignAll({ deviceId, entryId, assigneeId }) {
+  assignAll({ deviceId, entryId, assigneeId, expectedVersion }) {
     this.requireStaff(deviceId)
     const person = this.state.staff.find((row) => row.id === assigneeId)
     if (!person) fail(404, "找不到这个人")
     const entry = this.entryById(entryId)
+    assertExpectedVersion(entry, expectedVersion)
     for (const item of entry.items) item.assigneeId = assigneeId
     // 记住这个病人上次派给谁，下次「全部派给」一键照旧。
     const patient = this.patient(entry.patientId)
     patient.lastAssigneeId = assigneeId
+    bumpEntryVersion(entry)
     this.save()
     this.audit(deviceId, "全部派给", { 派给: person.name })
     return this.entryView(deviceId, entry.id)
@@ -440,9 +497,12 @@ export const entryMethods = {
     const day = this.day()
     const entry = day.entries.find((item) => item.id === entryId)
     if (!entry) fail(404, "今天没有这张单")
+    // 病人可能已经不在档案里（孤儿条目）：名字拿得到就用，拿不到也照样能拿掉。
+    const patient = this.state.patients.find((row) => row.id === entry.patientId)
+    const name = patient?.name || entry.patientId
     day.entries = day.entries.filter((item) => item.id !== entryId)
     this.save()
-    this.audit(deviceId, "从今天拿掉", { 病人: this.patient(entry.patientId).name })
+    this.audit(deviceId, "从今天拿掉", { 病人: name })
     return this.view(deviceId)
   },
 
@@ -539,7 +599,7 @@ export const entryMethods = {
     let items = source.items
     if (fromToday) {
       // 用今天这张单上的工作链，不走档案里旧存档。
-      const todayEntry = this.day().entries.find(
+      const todayEntry = this.todayRecord().entries.find(
         (entry) => entry.patientId === sourcePatient.id && entry.conditionIds.includes(conditionId),
       )
       if (!todayEntry) fail(404, "今天没有这张单")

@@ -207,6 +207,37 @@ if (labels !== "1,2,3,4") throw new Error(`人体序号不对：${labels}`)
 await shot(doctor, "/tmp/physio-body.png")
 console.log("3 点选顺序出现在清单和人体：通过")
 
+// 「全部派给」应在主操作栏（名单加项旁），不在「更多」里才找得到。
+const assignAllInActions = await run(doctor, `
+  const actions = document.querySelector(".patient-actions")
+  return Boolean(actions && [...actions.querySelectorAll("button")].some((b) => b.textContent.trim() === "全部派给"))
+`)
+if (!assignAllInActions) throw new Error("主操作栏没有「全部派给」")
+
+// 行内派工：点「未派」只弹出名单。
+const whoClicked = await run(doctor, `
+  const who = document.querySelector(".patient-who")
+  if (!who) return false
+  who.click()
+  return true
+`)
+if (!whoClicked) throw new Error("找不到行内派给按钮")
+await waitText(doctor, ["派给谁", "小李"])
+await clickButton(doctor, "小李")
+await waitText(doctor, ["小李"])
+console.log("3b 行内派工：通过")
+
+// 点已标记肌肉：弹出该部位上的组，而不是再加一项。
+await tapBody(doctor, "hamstring", Math.PI, 0)
+await sleep(400)
+await waitText(doctor, ["腘绳肌", "再加一项"])
+const groupOk = await run(doctor, `
+  return Boolean(document.querySelector(".patient-body-item") && document.body.innerText.includes("再加一项"))
+`)
+if (!groupOk) throw new Error("点已标记肌肉没有出组")
+await clickButton(doctor, "收起")
+console.log("3c 点已标记肌肉出组：通过")
+
 await clickButton(doctor, "返回")
 await waitText(doctor, ["今日单", "王阿姨"])
 await clickButton(doctor, "王阿姨")
@@ -272,7 +303,8 @@ await clickButton(doctor, "加入病人")
 await fill(doctor, "姓名", "李叔")
 await fill(doctor, "病症名称", "腰紧")
 await clickButton(doctor, "开始点选")
-await waitText(doctor, ["李叔"])
+await waitText(doctor, ["李叔", "说一句", "名单加项"])
+console.log("6a 无项时主路径露出说一句：通过")
 await clickButton(doctor, "返回")
 await waitText(doctor, ["今日单", "李叔"])
 await clickButton(doctor, "王阿姨")

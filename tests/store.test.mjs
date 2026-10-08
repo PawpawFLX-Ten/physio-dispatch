@@ -125,6 +125,30 @@ test("an existing single condition opens without asking, assign and complete sta
   assert.equal(condition.items[0].assigneeId, undefined)
 })
 
+test("new items keep the previous assignee; first item goes to the operator", () => {
+  const store = openStore()
+  setupRoom(store)
+  const created = store.createPatient({ deviceId: "doc", name: "王阿姨", conditionName: "右膝疼痛" })
+  const entryId = created.entry.id
+  const doc = store.state.staff.find((person) => person.name === "之之")
+  const aide = store.state.staff.find((person) => person.name === "小李")
+  store.setChief({ deviceId: "doc", entryId, targetId: "knee" })
+  const first = store.addItem({ deviceId: "doc", entryId, targetId: "hamstring" })
+  assert.equal(first.entry.items[0].assigneeId, doc.id)
+  store.patchItem({ deviceId: "doc", entryId, itemId: first.entry.items[0].id, patch: { assigneeId: aide.id } })
+  const second = store.addItem({ deviceId: "doc", entryId, targetId: "soleus" })
+  assert.equal(second.entry.items[1].assigneeId, aide.id)
+  // 单项改派不写回病症
+  const patched = store.patchItem({
+    deviceId: "doc",
+    entryId,
+    itemId: second.entry.items[1].id,
+    patch: { assigneeId: doc.id },
+  })
+  assert.equal(patched.entry.items[1].assigneeId, doc.id)
+  assert.equal(patched.entry.diverged, false)
+})
+
 test("reorder asks before writing back, and declining keeps the saved condition", () => {
   const store = openStore()
   setupRoom(store)
@@ -982,4 +1006,240 @@ test("copyCondition fromToday uses today's chain without assignee or done", () =
       }),
     /今天没有这张单/,
   )
+})
+
+test("entry version bumps; stale reorder loses to a completed item", () => {
+  const store = openStore()
+  setupRoom(store)
+  const created = store.createPatient({ deviceId: "doc", name: "王阿姨", conditionName: "右膝疼痛" })
+  const entryId = created.entry.id
+  store.setChief({ deviceId: "doc", entryId, targetId: "knee" })
+  store.addItem({ deviceId: "doc", entryId, targetId: "hamstring" })
+  store.addItem({ deviceId: "doc", entryId, targetId: "soleus" })
+  // 旧数据没有 version 时按 0 兼容
+  delete store.entryById(entryId).version
+  const entry = store.entryById(entryId)
+  assert.equal(created.entry.version ?? 0, 0)
+
+  const aide = store.state.staff.find((person) => person.name === "小李")
+  store.assignAll({ deviceId: "doc", entryId, assigneeId: aide.id, expectedVersion: 0 })
+  assert.equal(store.entryById(entryId).version, 1)
+
+  const ids = store.entryById(entryId).items.map((item) => item.id)
+  // 助手先完成第一项（版本 1）
+  store.patchItem({
+    deviceId: "aide",
+    entryId,
+    itemId: ids[0],
+    patch: { done: true },
+    expectedVersion: 1,
+  })
+  assert.equal(store.entryById(entryId).items[0].done, true)
+  assert.equal(store.entryById(entryId).version, 2)
+
+  // 主治还拿着旧版本去重排：冲突，完成态不能丢
+  assert.throws(
+    () =>
+      store.reorder({
+        deviceId: "doc",
+        entryId,
+        orderedIds: [ids[1], ids[0]],
+        expectedVersion: 1,
+      }),
+    (err) => err.status === 409 && /别人刚改过|重新拉取/.test(err.message),
+  )
+  assert.equal(store.entryById(entryId).items[0].done, true)
+  assert.equal(store.entryById(entryId).items[0].id, ids[0])
+  assert.equal(store.entryById(entryId).version, 2)
+
+  // 不带期望版本时仍可改（旧客户端），但会继续往上加版本
+  store.reorder({ deviceId: "doc", entryId, orderedIds: [ids[1], ids[0]] })
+  assert.equal(store.entryById(entryId).version, 3)
+  assert.equal(store.entryById(entryId).items[0].id, ids[1])
+  assert.equal(store.entryById(entryId).items[1].done, true)
+})
+
+test("carry unfinished brings only open items; repeat-last still resets a full chain", () => {
+  const store = openStore()
+  setupRoom(store)
+  const created = store.createPatient({ deviceId: "doc", name: "王阿姨", conditionName: "右膝疼痛" })
+  const entryId = created.entry.id
+  const aide = store.state.staff.find((person) => person.name === "小李")
+  store.setChief({ deviceId: "doc", entryId, targetId: "knee", side: "right" })
+  store.addItem({ deviceId: "doc", entryId, targetId: "hamstring", side: "right" })
+  store.addItem({ deviceId: "doc", entryId, targetId: "soleus", side: "right" })
+  store.addItem({ deviceId: "doc", entryId, targetId: "plantar", side: "right" })
+  store.assignAll({ deviceId: "doc", entryId, assigneeId: aide.id })
+  const [first, second, third] = store.entryById(entryId).items
+  store.patchItem({ deviceId: "aide", entryId, itemId: first.id, patch: { done: true } })
+
+  const today = todayKey()
+  const days = { ...store.state.days }
+  days["2020-01-02"] = days[today]
+  delete days[today]
+  store.state.days = days
+
+  const patientRow = store.view("doc").patients.find((patient) => patient.name === "王阿姨")
+  assert.equal(patientRow.hasUnfinishedPrev, true)
+  const carried = store.carryUnfinished({ deviceId: "doc", patientId: patientRow.id })
+  assert.deepEqual(
+    carried.entry.items.map((item) => item.targetId),
+    ["soleus", "plantar"],
+  )
+  assert.equal(carried.entry.items.every((item) => item.done === false), true)
+  assert.equal(carried.entry.items.every((item) => item.assigneeId === aide.id), true)
+  assert.equal(carried.entry.chiefSiteId, "knee")
+  assert.equal(carried.entry.chiefSide, "right")
+  // 已完成的 hamstring 不能原样拷成已完成
+  assert.equal(
+    carried.entry.items.some((item) => item.targetId === "hamstring"),
+    false,
+  )
+  assert.throws(() => store.carryUnfinished({ deviceId: "doc", patientId: patientRow.id }), /已经在单上/)
+
+  store.dropEntry({ deviceId: "doc", entryId: carried.entry.id })
+  const repeated = store.repeatLastDay({ deviceId: "doc", patientId: patientRow.id })
+  assert.deepEqual(
+    repeated.entry.items.map((item) => item.targetId),
+    ["hamstring", "soleus", "plantar"],
+  )
+  assert.equal(repeated.entry.items.every((item) => item.done === false), true)
+  assert.equal(second.targetId, "soleus")
+  assert.equal(third.targetId, "plantar")
+})
+
+test("export records lastExportAt; backup mirror copies only when BACKUP_MIRROR_DIR is set", () => {
+  const store = openStore()
+  setupRoom(store)
+  assert.equal(store.view("doc").lastExportAt, null)
+  const before = store.exportData("doc")
+  assert.ok(before.lastExportAt)
+  assert.equal(store.view("doc").lastExportAt, before.lastExportAt)
+
+  const mirror = fs.mkdtempSync(path.join(os.tmpdir(), "clinic-mirror-"))
+  const untouched = path.join(os.tmpdir(), `clinic-no-mirror-${Date.now()}`)
+  const prev = process.env.BACKUP_MIRROR_DIR
+  try {
+    delete process.env.BACKUP_MIRROR_DIR
+    store.createPatient({ deviceId: "doc", name: "李叔", conditionName: "腰紧" })
+    assert.equal(fs.existsSync(untouched), false)
+
+    process.env.BACKUP_MIRROR_DIR = mirror
+    // 拉开备份间隔，强制再抄一份
+    const backupDir = store.backupDir()
+    for (const name of store.backupFiles(backupDir)) {
+      const stamp = Date.now() - 120_000
+      fs.utimesSync(path.join(backupDir, name), stamp / 1000, stamp / 1000)
+    }
+    store.createPatient({ deviceId: "doc", name: "张姐", conditionName: "肩紧" })
+    const mirrored = fs.readdirSync(mirror).filter((name) => /^clinic-\d{8}-\d{6}\.json$/.test(name))
+    assert.ok(mirrored.length >= 1)
+  } finally {
+    if (prev === undefined) delete process.env.BACKUP_MIRROR_DIR
+    else process.env.BACKUP_MIRROR_DIR = prev
+  }
+})
+
+test("imported day entries with broken innards get cleaned; view stays usable", () => {
+  const store = openStore()
+  setupRoom(store)
+  const created = store.createPatient({ deviceId: "doc", name: "导入阿姨", conditionName: "腰紧" })
+  const patientId = created.entry.patientId
+  const data = structuredClone(store.state)
+  const key = Object.keys(data.days)[0]
+  data.passphrase = "遗留的口令哈希"
+  data.days[key].entries = [
+    { id: "e-bare", patientId }, // 缺 conditionIds / items
+    {
+      id: "e-junk",
+      patientId,
+      conditionIds: "腰紧",
+      items: [null, { targetId: "hamstring", technique: "乱写", assigneeId: "没这个人" }],
+    },
+  ]
+  const view = store.importData({ deviceId: "doc", data })
+  assert.equal(view.today.length, 2)
+  assert.equal("passphrase" in store.state, false)
+  const bare = store.state.days[key].entries.find((entry) => entry.id === "e-bare")
+  assert.deepEqual(bare.conditionIds, [])
+  assert.deepEqual(bare.items, [])
+  const junk = store.state.days[key].entries.find((entry) => entry.id === "e-junk")
+  assert.equal(junk.items.length, 1)
+  assert.equal(junk.items[0].technique, "massage")
+  assert.equal(junk.items[0].direction, "along")
+  assert.equal(junk.items[0].assigneeId, null)
+  assert.deepEqual(junk.conditionIds, [])
+})
+
+test("clinic.json with broken day innards loads into a usable shape", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "clinic-broken-innards-"))
+  const file = path.join(dir, "clinic.json")
+  const store = new ClinicStore(file)
+  store.load()
+  store.setup({ deviceId: "doc", staffName: "之之" })
+  const created = store.createPatient({ deviceId: "doc", name: "磁盘阿姨", conditionName: "膝盖" })
+  const data = JSON.parse(fs.readFileSync(file, "utf8"))
+  const key = Object.keys(data.days)[0]
+  data.days[key].entries[0].items = null
+  data.days[key].entries[0].conditionIds = 7
+  data.passphrase = "遗留的口令哈希"
+  fs.writeFileSync(file, JSON.stringify(data))
+
+  const revived = new ClinicStore(file)
+  revived.load()
+  const view = revived.view("doc")
+  assert.equal(view.stage, "ready")
+  assert.equal(view.today.length, 1)
+  const entry = revived.state.days[key].entries.find((row) => row.patientId === created.entry.patientId)
+  assert.deepEqual(entry.conditionIds, [])
+  assert.deepEqual(entry.items, [])
+  assert.equal("passphrase" in revived.state, false)
+})
+
+test("patchItem rejects unknown technique, direction and assignee without touching the item", () => {
+  const store = openStore()
+  setupRoom(store)
+  const created = store.createPatient({ deviceId: "doc", name: "王阿姨", conditionName: "右膝疼痛" })
+  const entryId = created.entry.id
+  store.setChief({ deviceId: "doc", entryId, targetId: "knee" })
+  store.addItem({ deviceId: "doc", entryId, targetId: "hamstring" })
+  const item = store.entryById(entryId).items[0]
+  assert.throws(
+    () => store.patchItem({ deviceId: "doc", entryId, itemId: item.id, patch: { technique: "乱写" } }),
+    /手法不对/,
+  )
+  assert.throws(
+    () => store.patchItem({ deviceId: "doc", entryId, itemId: item.id, patch: { direction: "乱写" } }),
+    /方向不对/,
+  )
+  assert.throws(
+    () => store.patchItem({ deviceId: "doc", entryId, itemId: item.id, patch: { assigneeId: "没这个人" } }),
+    /找不到这个人/,
+  )
+  assert.equal(item.technique, "massage")
+  assert.equal(item.direction, "along")
+  assert.equal(item.assigneeId, store.state.staff[0].id)
+  assert.equal(store.state.patients[0].lastAssigneeId, undefined)
+})
+
+test("dropping an orphan entry no longer blows up after save", () => {
+  const store = openStore()
+  setupRoom(store)
+  const created = store.createPatient({ deviceId: "doc", name: "孤儿阿姨", conditionName: "腰紧" })
+  const entryId = created.entry.id
+  // 病人被直接从档案里抠掉（绕过所有写方法），条目成了孤儿
+  store.state.patients = []
+  const view = store.dropEntry({ deviceId: "doc", entryId })
+  assert.equal(view.today.length, 0)
+})
+
+test("merely reading the session no longer leaves an empty day behind", () => {
+  const store = openStore()
+  setupRoom(store)
+  const view = store.view("doc")
+  assert.equal(view.today.length, 0)
+  assert.equal(store.state.days[todayKey()], undefined)
+  // 写路径照旧能建今天
+  store.createPatient({ deviceId: "doc", name: "李叔", conditionName: "腰紧" })
+  assert.ok(store.state.days[todayKey()])
 })

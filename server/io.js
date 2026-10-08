@@ -1,7 +1,7 @@
 // 落盘的事都在这：原子写、备份、审计、导入导出。
 import fs from "node:fs"
 import path from "node:path"
-import { emptyState, fail, sanitizeState, two } from "./helpers.js"
+import { emptyState, fail, normalizeLoadedState, sanitizeState, two } from "./helpers.js"
 
 const BACKUP_INTERVAL_MS = 60_000
 const BACKUP_KEEP = 30
@@ -44,6 +44,17 @@ export const ioMethods = {
       }
       fs.copyFileSync(this.file, path.join(dir, name))
       this.pruneBackups(dir)
+      // 可选：再抄一份到机外目录（U 盘、网盘同步夹）。没设环境变量就不做。
+      const mirror = process.env.BACKUP_MIRROR_DIR
+      if (mirror && String(mirror).trim()) {
+        try {
+          const mirrorDir = path.resolve(String(mirror).trim())
+          fs.mkdirSync(mirrorDir, { recursive: true })
+          fs.copyFileSync(this.file, path.join(mirrorDir, name))
+        } catch {
+          /* 镜像失败不挡主备份 */
+        }
+      }
     } catch {
       /* 备份失败不挡保存，主文件照常写 */
     }
@@ -93,16 +104,20 @@ export const ioMethods = {
       this.rebuildDayIndex()
       return
     }
+    let state = null
     try {
-      this.state = JSON.parse(fs.readFileSync(this.file, "utf8"))
+      state = normalizeLoadedState(JSON.parse(fs.readFileSync(this.file, "utf8")))
     } catch {
-      // 主文件读不出来时退回最新一份能解析的备份，别让整间治疗室开不了门。
+      state = null
+    }
+    if (!state) {
+      // 主文件读不出来或形状不对时退回最新一份能用的备份，别让整间治疗室开不了门。
       const recovered = this.recoverFromBackup()
       if (!recovered) fail(500, "治疗室数据读不出来")
-      this.state = recovered
+      state = recovered
       console.error(`[clinic] clinic.json 损坏，已回退到备份 ${this.recoveredFrom}（最近一分钟的数据可能没有）`)
     }
-    if (!Array.isArray(this.state.templates)) this.state.templates = []
+    this.state = state
     this.rebuildDayIndex()
   },
 
@@ -110,10 +125,10 @@ export const ioMethods = {
     const dir = this.backupDir()
     for (const name of [...this.backupFiles(dir)].reverse()) {
       try {
-        const data = JSON.parse(fs.readFileSync(path.join(dir, name), "utf8"))
-        if (data && typeof data === "object") {
+        const state = normalizeLoadedState(JSON.parse(fs.readFileSync(path.join(dir, name), "utf8")))
+        if (state) {
           this.recoveredFrom = name
-          return data
+          return state
         }
       } catch {
         /* 这份备份也读不出来，接着试更早的 */
@@ -181,6 +196,9 @@ export const ioMethods = {
 
   exportData(deviceId) {
     this.requireStaff(deviceId)
+    this.state.lastExportAt = new Date().toISOString()
+    this.save()
+    this.audit(deviceId, "导出数据")
     return structuredClone(this.state)
   },
 
@@ -191,8 +209,10 @@ export const ioMethods = {
     if (next.staff.some((person) => person.id === staff.id)) next.devices[deviceId] = staff.id
     this.state = next
     this.rebuildDayIndex()
+    // 先确认新数据能正常投影再落盘：万一视图还有意外，坏数据不至于写进档案。
+    const result = this.view(deviceId)
     this.save()
     this.audit(deviceId, "导入数据", { 病人: next.patients.length, 名单: next.staff.length })
-    return this.view(deviceId)
+    return result
   },
 }

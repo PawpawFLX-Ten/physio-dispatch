@@ -56,23 +56,28 @@ app.delete(
   "/api/patients/:id/conditions/:conditionId",
   asyncRoute((req) =>
     store.deleteCondition({
-      deviceId: req.body.deviceId,
+      // DELETE 的 body 个别代理会剥掉：deviceId 也认 query 里的。
+      deviceId: req.body?.deviceId || req.query?.deviceId,
       patientId: req.params.id,
       conditionId: req.params.conditionId,
     }),
   ),
 )
 app.post("/api/templates", asyncRoute((req) => store.saveTemplateFromEntry(req.body)))
-app.delete("/api/templates/:id", asyncRoute((req) => store.deleteTemplate({ deviceId: req.body.deviceId, templateId: req.params.id })))
+app.delete(
+  "/api/templates/:id",
+  asyncRoute((req) => store.deleteTemplate({ deviceId: req.body?.deviceId || req.query?.deviceId, templateId: req.params.id })),
+)
 app.post("/api/today/entries", asyncRoute((req) => store.addExisting(req.body)))
 app.post("/api/today/entries/repeat-last", asyncRoute((req) => store.repeatLastDay(req.body)))
+app.post("/api/today/entries/carry-unfinished", asyncRoute((req) => store.carryUnfinished(req.body)))
 app.get("/api/entries/:id", asyncRoute((req) => store.entryView(req.query.deviceId, req.params.id)))
 app.post("/api/entries/:id/conditions", asyncRoute((req) => store.addCondition({ ...req.body, entryId: req.params.id })))
 app.post("/api/entries/:id/chief", asyncRoute((req) => store.setChief({ ...req.body, entryId: req.params.id })))
 app.post("/api/entries/:id/items", asyncRoute((req) => store.addItem({ ...req.body, entryId: req.params.id })))
 app.post("/api/entries/:id/items/restore", asyncRoute((req) => store.restoreItem({ ...req.body, entryId: req.params.id })))
 app.patch("/api/entries/:id/items/:itemId", asyncRoute((req) => store.patchItem({ ...req.body, entryId: req.params.id, itemId: req.params.itemId })))
-app.delete("/api/entries/:id/items/:itemId", asyncRoute((req) => store.removeItem({ deviceId: req.body.deviceId, entryId: req.params.id, itemId: req.params.itemId })))
+app.delete("/api/entries/:id/items/:itemId", asyncRoute((req) => store.removeItem({ deviceId: req.body?.deviceId || req.query?.deviceId, entryId: req.params.id, itemId: req.params.itemId })))
 app.post("/api/entries/:id/reorder", asyncRoute((req) => store.reorder({ ...req.body, entryId: req.params.id })))
 app.post("/api/entries/:id/assign-all", asyncRoute((req) => store.assignAll({ ...req.body, entryId: req.params.id })))
 app.post("/api/entries/:id/include", asyncRoute((req) => store.includeCondition({ ...req.body, entryId: req.params.id })))
@@ -127,8 +132,11 @@ store.subscribe(() => {
 })
 
 app.get("/api/data/export", (req, res) => {
+  // 和 asyncRoute 一样标好这次是谁在动数据：导出也会落盘（记 lastExportAt），
+  // 触发的 SSE 广播得带上 origin，免得导出者自己也被白拉一遍。
+  currentOrigin = String(req.query.deviceId || "")
   try {
-    const data = store.exportData(String(req.query.deviceId || ""))
+    const data = store.exportData(currentOrigin)
     res.setHeader("Content-Disposition", `attachment; filename="clinic-${todayKey()}.json"`)
     res.json(data)
   } catch (error) {
@@ -138,6 +146,8 @@ app.get("/api/data/export", (req, res) => {
       console.error("[clinic]", error)
       res.status(500).json({ error: "导不出，稍后再试" })
     }
+  } finally {
+    currentOrigin = null
   }
 })
 
