@@ -74,6 +74,7 @@ buildClient()
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "clinic-ui-e2e-"))
 const server = await startServer(dataDir)
 const browser = await launchBrowser()
+let soloServer = null
 
 async function context() {
   const ctx = await browser.newContext({ viewport: { width: 430, height: 932 }, deviceScaleFactor: 1 })
@@ -185,11 +186,15 @@ try {
 
   const aide = await context()
   await aide.page.goto(`${BASE}/?device=2`, { waitUntil: "load" })
-  await waitText(aide.page, ["今天你是谁", "之之"])
+  // 单人名单：自动认领为「之之」，不问身份直接进今日单。
+  await waitText(aide.page, ["今日单", "之之"])
+  // 要当第二个名字：设置 → 我是谁 → 新名字。
+  await clickButton(aide.page, "设置")
+  await waitText(aide.page, ["我是谁"])
   await fill(aide.page, "新名字", "小李")
-  await clickButton(aide.page, "添加并进入")
+  await clickButton(aide.page, "加名字并切换")
   await waitText(aide.page, ["今日单", "小李"])
-  console.log("1b 第二台选名字：通过")
+  console.log("1b 单人免选身份直接进；加第二个名字走设置：通过")
 
   await clickButton(doctor.page, "加入病人")
   await waitText(doctor.page, ["新病人"])
@@ -231,7 +236,7 @@ try {
   await shot(doctor.page, "/tmp/physio-body.png")
   console.log("3 点选顺序出现在清单和人体：通过")
 
-  // 「全部派给」应在主操作栏（名单加项旁），不在「更多」里才找得到。
+  // 「全部派给」应在主操作栏（加项旁），不在「更多」里才找得到。
   const assignAllInActions = await run(doctor.page, `
     const actions = document.querySelector(".patient-actions")
     return Boolean(actions && [...actions.querySelectorAll("button")].some((b) => b.textContent.trim() === "全部派给"))
@@ -327,8 +332,8 @@ try {
   await fill(doctor.page, "姓名", "李叔")
   await fill(doctor.page, "病症名称", "腰紧")
   await clickButton(doctor.page, "开始点选")
-  await waitText(doctor.page, ["李叔", "说一句", "名单加项"])
-  console.log("6a 无项时主路径露出说一句：通过")
+  await waitText(doctor.page, ["李叔", "加项"])
+  console.log("6a 无项时主路径露出加项（面板里说一句自动聚焦）：通过")
   await clickButton(doctor.page, "返回")
   await waitText(doctor.page, ["今日单", "李叔"])
   await clickButton(doctor.page, "王阿姨")
@@ -372,9 +377,41 @@ try {
   await waitText(broken.page, ["已完成", "模型没有加载出来"])
   console.log("7 模型失败时清单仍能完成：通过")
 
+  // 8 单人治疗室免选身份：第二台手机打开不问「今天你是谁」，直接就是今日单。
+  const soloDir = fs.mkdtempSync(path.join(os.tmpdir(), "clinic-ui-e2e-solo-"))
+  const soloPort = PORT + 1
+  soloServer = spawn(process.execPath, ["server/index.js"], {
+    cwd: root,
+    env: { ...process.env, DATA_DIR: soloDir, PORT: String(soloPort), HOST: "127.0.0.1" },
+    stdio: "ignore",
+  })
+  const soloBase = `http://127.0.0.1:${soloPort}`
+  for (let i = 0; i < 80; i += 1) {
+    try {
+      if ((await fetch(`${soloBase}/api/health`)).ok) break
+    } catch {
+      /* 还没起来 */
+    }
+    await sleep(250)
+  }
+  const soloDoctor = await context()
+  await soloDoctor.page.goto(`${soloBase}/?device=9`, { waitUntil: "load" })
+  await waitText(soloDoctor.page, ["进入治疗室", "我的名字"])
+  await fill(soloDoctor.page, "我的名字", "独立医生")
+  await clickButton(soloDoctor.page, "进入治疗室")
+  await waitText(soloDoctor.page, ["今日单", "独立医生"])
+  const soloSecond = await context()
+  await soloSecond.page.goto(`${soloBase}/?device=10`, { waitUntil: "load" })
+  await waitText(soloSecond.page, ["今日单", "今天还没有病人"])
+  const askedWho = await run(soloSecond.page, `return document.body.innerText.includes("今天你是谁")`)
+  if (askedWho) throw new Error("单人治疗室还在问身份")
+  console.log("8 单人治疗室免选身份，打开就是今日单：通过")
+
   console.log("UI_E2E_OK")
   fs.rmSync(dataDir, { recursive: true, force: true })
+  fs.rmSync(soloDir, { recursive: true, force: true })
 } finally {
   await browser.close().catch(() => {})
   server.kill()
+  soloServer?.kill()
 }

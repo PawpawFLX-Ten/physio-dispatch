@@ -138,6 +138,7 @@ function ChoiceButton({ target, side, pending, onPick }) {
 // 顶上「说一句」把整句话直接变成清单，说话靠键盘自带的语音输入。
 function ListPicker({ entry, pending, notice, query, onQuery, onPickSite, onPickWork, onQuickAdd, onClose }) {
   const [quickText, setQuickText] = useState("")
+  const sheetSearchRef = useRef(null)
   const parsed = useMemo(() => parseQuickOrder(quickText), [quickText])
   const hasSomething = Boolean(parsed.chief) || parsed.items.length > 0
   const needSite = !entry?.chiefSiteId
@@ -152,12 +153,13 @@ function ListPicker({ entry, pending, notice, query, onQuery, onPickSite, onPick
   const sideTags = (target) => (hasSides(target) ? ["left", "right"] : [null])
 
   return (
-    <Sheet title="点名加项" onClose={onClose}>
+    <Sheet title="加项" onClose={onClose}>
       <Notice notice={notice} />
       <input
         className="patient-search patient-quick-input"
         type="text"
         value={quickText}
+        autoFocus
         placeholder="说一句：左膝 股四头按摩8分钟 然后腘绳肌松解"
         aria-label="说一句加项"
         enterKeyHint="done"
@@ -179,7 +181,22 @@ function ListPicker({ entry, pending, notice, query, onQuery, onPickSite, onPick
             </ol>
           ) : null}
           {parsed.unknown.length ? (
-            <p className="patient-quick-unknown">{`没认出来（会跳过）：${parsed.unknown.join("、")}`}</p>
+            <p className="patient-quick-unknown">
+              {"没认出来（点一下去搜）："}
+              {parsed.unknown.map((word) => (
+                <button
+                  key={word}
+                  type="button"
+                  className="patient-quick-word"
+                  onClick={() => {
+                    onQuery(word)
+                    sheetSearchRef.current?.focus()
+                  }}
+                >
+                  {word}
+                </button>
+              ))}
+            </p>
           ) : null}
           <button
             type="button"
@@ -192,6 +209,7 @@ function ListPicker({ entry, pending, notice, query, onQuery, onPickSite, onPick
         </div>
       ) : null}
       <input
+        ref={sheetSearchRef}
         className="patient-search"
         type="search"
         value={query}
@@ -1226,23 +1244,10 @@ export function PatientDay({ entryId, pulse, onBack }) {
           </div>
         ) : null}
         <div className="patient-actions">
-          {(entry.items?.length || 0) === 0 ? (
-            <button
-              type="button"
-              className="primary"
-              disabled={pending}
-              onClick={() => {
-                setNotice(blankNotice)
-                closeSheets()
-                setListOpen(true)
-              }}
-            >
-              说一句
-            </button>
-          ) : null}
+          {/* 一个「加项」进面板：顶上是说一句，往下是搜名单，不再分两个按钮。 */}
           <button
             type="button"
-            className="secondary"
+            className={(entry.items?.length || 0) === 0 ? "primary" : "secondary"}
             disabled={pending}
             onClick={() => {
               setNotice(blankNotice)
@@ -1250,7 +1255,7 @@ export function PatientDay({ entryId, pulse, onBack }) {
               setListOpen(true)
             }}
           >
-            名单加项
+            加项
           </button>
           {entry.items?.length > 0 ? (
             <button

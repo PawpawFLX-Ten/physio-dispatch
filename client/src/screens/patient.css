@@ -581,6 +581,20 @@
   margin: 0 0 6px;
 }
 
+/* 说一句没认出来的词：点一下填进下面的搜索框直接去搜。 */
+.patient-quick-word {
+  display: inline-block;
+  margin: 2px 3px 0 0;
+  padding: 0 10px;
+  min-height: 30px;
+  border: 0;
+  border-radius: 999px;
+  background: #fffdf8;
+  box-shadow: inset 0 0 0 1px #e4dccb;
+  color: #5e584e;
+  font-size: 13px;
+}
+
 .patient-row.is-current .patient-row-main {
   box-shadow: inset 3px 0 0 #c45c26;
   background: #fdf6ee;

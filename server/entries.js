@@ -9,6 +9,21 @@ import {
 } from "../shared/catalog.js"
 import { assertExpectedVersion, bumpEntryVersion, fail, id, normalizeSide } from "./helpers.js"
 
+// 下手项的部位必须真实存在，且不能是纯部位（膝盖这类要先当作要治的地方）。
+// 点选、说一句、撤销插回三条路共用同一句报错。
+function workTargetOrThrow(targetId) {
+  const target = targetById(targetId)
+  if (!target || target.kind === "site") fail(400, "这个位置要先当作要治的地方，不能直接下手")
+  return target
+}
+
+// 焦点病症：没设或已失效时，退回最后挂进今天的那条。
+function focusOf(entry) {
+  return entry.focusConditionId && entry.conditionIds.includes(entry.focusConditionId)
+    ? entry.focusConditionId
+    : entry.conditionIds[entry.conditionIds.length - 1]
+}
+
 export const entryMethods = {
   createPatient({ deviceId, name, conditionName }) {
     this.requireStaff(deviceId)
@@ -150,15 +165,11 @@ export const entryMethods = {
       entry.chiefSiteId = chief.targetId
       entry.chiefSide = normalizeSide(chief.side)
     }
-    const focus =
-      entry.focusConditionId && entry.conditionIds.includes(entry.focusConditionId)
-        ? entry.focusConditionId
-        : entry.conditionIds[entry.conditionIds.length - 1]
     const previous = entry.items[entry.items.length - 1]
+    const focus = focusOf(entry)
     let added = 0
     for (const item of Array.isArray(items) ? items : []) {
-      const target = targetById(item?.targetId)
-      if (!target || target.kind === "site") fail(400, "这项不能当下手项")
+      workTargetOrThrow(item?.targetId)
       // 下手项必须先有要治的地方（本请求里刚设的也算）。
       if (!entry.chiefSiteId) fail(400, "请先点要治的地方，再加下手项")
       if (!TECHNIQUES.some((row) => row.id === item.technique)) fail(400, "手法不对")
@@ -171,7 +182,7 @@ export const entryMethods = {
         id: id(),
         conditionId: focus,
         sourceItemId: null,
-        targetId: target.id,
+        targetId: item.targetId,
         side: normalizeSide(item.side),
         technique: item.technique,
         direction: item.direction,
@@ -327,8 +338,7 @@ export const entryMethods = {
 
   addItem({ deviceId, entryId, targetId, side }) {
     const staff = this.requireStaff(deviceId)
-    const target = targetById(targetId)
-    if (!target || target.kind === "site") fail(400, "这个位置要先当作要治的地方，不能直接下手")
+    workTargetOrThrow(targetId)
     const entry = this.entryById(entryId)
     if (!entry.chiefSiteId) fail(400, "请先点要治的地方，再加下手项")
     const previous = entry.items[entry.items.length - 1]
@@ -339,10 +349,7 @@ export const entryMethods = {
       Object.assign(dose, defaultDose("equipment"))
       delete dose.minutes
     }
-    const focus =
-      entry.focusConditionId && entry.conditionIds.includes(entry.focusConditionId)
-        ? entry.focusConditionId
-        : entry.conditionIds[entry.conditionIds.length - 1]
+    const focus = focusOf(entry)
     entry.items.push({
       id: id(),
       conditionId: focus,
@@ -425,14 +432,10 @@ export const entryMethods = {
     const at = Number(index)
     if (!Number.isInteger(at) || at < 0 || at > entry.items.length) fail(400, "插回位置不对")
     if (!item || typeof item !== "object") fail(400, "缺少要插回的项")
-    const target = targetById(item.targetId)
-    if (!target || target.kind === "site") fail(400, "这个位置要先当作要治的地方，不能直接下手")
+    workTargetOrThrow(item.targetId)
     if (item.technique && !TECHNIQUES.some((row) => row.id === item.technique)) fail(400, "手法不对")
     if (item.direction && !DIRECTIONS.some((row) => row.id === item.direction)) fail(400, "方向不对")
-    const focus =
-      entry.focusConditionId && entry.conditionIds.includes(entry.focusConditionId)
-        ? entry.focusConditionId
-        : entry.conditionIds[entry.conditionIds.length - 1]
+    const focus = focusOf(entry)
     const conditionId =
       typeof item.conditionId === "string" && entry.conditionIds.includes(item.conditionId)
         ? item.conditionId

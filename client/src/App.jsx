@@ -25,6 +25,22 @@ export default function App() {
     refresh().catch((err) => setError(err.message))
   }, [])
 
+  // 单人治疗室不用挑身份：名单里只有一个人时自动认领，打开就是今日单。
+  // 挑选界面只留给多人治疗室；第一台手机建名字的流程不受影响。
+  useEffect(() => {
+    if (snap?.stage !== "whoami" || snap.staff?.length !== 1) return undefined
+    let cancelled = false
+    api
+      .claim({ staffId: snap.staff[0].id })
+      .then((next) => {
+        if (!cancelled && next.stage === "ready") setSnap(next)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [snap?.stage, snap?.staff?.length])
+
   // 别的手机一改，服务器推一条过来：停在今日单就刷新列表，开着病人页由病人页自己拉。
   useEffect(() => {
     let source

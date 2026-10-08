@@ -22,6 +22,7 @@ export function Today({ snap, onRefresh, onOpen }) {
   const [activeId, setActiveId] = useState(null)
   const [checked, setChecked] = useState([])
   const [settings, setSettings] = useState(false)
+  const [newStaffName, setNewStaffName] = useState("")
   const [mineOnly, setMineOnly] = useState(false)
   const [staffView, setStaffView] = useState(false)
   const prevMineCount = useRef(null)
@@ -665,6 +666,33 @@ export function Today({ snap, onRefresh, onOpen }) {
                     </button>
                   ))}
                 </div>
+                {/* 单人时新手机会被自动认领：想加第二个名字，从这里进来。 */}
+                <form
+                  className="stack gate-form"
+                  noValidate
+                  onSubmit={(event) => {
+                    event.preventDefault()
+                    run(async () => {
+                      await api.claim({ staffName: newStaffName })
+                      setNewStaffName("")
+                      await onRefresh()
+                      setSettings(false)
+                    })
+                  }}
+                >
+                  <label className="field">
+                    新名字
+                    <input
+                      value={newStaffName}
+                      autoComplete="off"
+                      enterKeyHint="done"
+                      onChange={(event) => setNewStaffName(event.target.value)}
+                    />
+                  </label>
+                  <button className="secondary" type="submit" disabled={pending || !newStaffName.trim()}>
+                    加名字并切换
+                  </button>
+                </form>
                 {archivedPatients.length ? (
                   <>
                     <h3>已归档病人</h3>
