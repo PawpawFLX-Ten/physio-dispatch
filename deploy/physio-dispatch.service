@@ -1,0 +1,24 @@
+# systemd user unit 示例。不要直接假设用户家目录；
+# 推荐用仓库里的安装脚本（会填入实际仓库路径）：
+#   ./scripts/install-user-systemd.sh
+#
+# 或复制本文件到 $XDG_CONFIG_HOME/systemd/user/physio-dispatch.service
+# 后把 WorkingDirectory / ExecStart 改成你的仓库绝对路径。
+
+[Unit]
+Description=治疗室派工（局域网 Node 服务）
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/REPLACE/WITH/REPO/ROOT
+Environment=PORT=8787
+Environment=HOST=0.0.0.0
+# Environment=BACKUP_MIRROR_DIR=/REPLACE/WITH/MIRROR/DIR
+ExecStart=/REPLACE/WITH/REPO/ROOT/scripts/start-clinic.sh
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
