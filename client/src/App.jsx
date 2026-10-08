@@ -57,6 +57,16 @@ export default function App() {
     refresh().catch(() => {})
   }, [pulse])
 
+  // 微信里切走或手机锁屏时页面会被挂起，SSE 可能悄悄断掉：
+  // 回到前台就当收到一次推送，别等心跳慢慢补。
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible") setPulse((n) => n + 1)
+    }
+    document.addEventListener("visibilitychange", onVisible)
+    return () => document.removeEventListener("visibilitychange", onVisible)
+  }, [])
+
   if (error && !snap) {
     return <main className="screen"><p className="error">{error}</p></main>
   }

@@ -1,9 +1,24 @@
+// crypto.randomUUID 是安全上下文（https / localhost）才有的；
+// 局域网 http 或微信内置浏览器里是 undefined，得退回 getRandomValues 自己拼。
+function uuid() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID()
+  if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") {
+    const bytes = new Uint8Array(16)
+    crypto.getRandomValues(bytes)
+    bytes[6] = (bytes[6] & 0x0f) | 0x40
+    bytes[8] = (bytes[8] & 0x3f) | 0x80
+    const hex = [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("")
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+  }
+  return `dev-${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`
+}
+
 export function getDeviceId() {
   const forced = new URLSearchParams(window.location.search).get("device")
   const key = forced ? `physio-device-id:${forced}` : "physio-device-id"
   let id = localStorage.getItem(key) || sessionStorage.getItem(key)
   if (!id) {
-    id = crypto.randomUUID()
+    id = uuid()
     localStorage.setItem(key, id)
   } else if (!localStorage.getItem(key)) {
     localStorage.setItem(key, id)
@@ -53,13 +68,16 @@ export const api = {
     request("/api/patients/from-template", { method: "POST", body: { name, templateId } }),
   saveTemplateFromEntry: (entryId, conditionId, name) =>
     request("/api/templates", { method: "POST", body: { entryId, conditionId, name } }),
-  deleteTemplate: (templateId) => request(`/api/templates/${templateId}`, { method: "DELETE", body: {} }),
+  // DELETE 也把 deviceId 放进 query：个别代理会剥掉 DELETE 的 body。
+  deleteTemplate: (templateId) => request(withDevice(`/api/templates/${templateId}`), { method: "DELETE", body: {} }),
   applyTemplateToEntry: (entryId, templateId) =>
     request(`/api/entries/${entryId}/apply-template`, { method: "POST", body: { templateId } }),
   quickAdd: (entryId, parsed) =>
     request(`/api/entries/${entryId}/quick-add`, { method: "POST", body: parsed }),
   repeatLastDay: (patientId) =>
     request("/api/today/entries/repeat-last", { method: "POST", body: { patientId } }),
+  carryUnfinished: (patientId) =>
+    request("/api/today/entries/carry-unfinished", { method: "POST", body: { patientId } }),
   setPatientNote: (patientId, note) =>
     request(`/api/patients/${patientId}/note`, { method: "POST", body: { note } }),
   renamePatient: (patientId, name) =>
@@ -67,19 +85,31 @@ export const api = {
   setPatientArchived: (patientId, archived) =>
     request(`/api/patients/${patientId}/archive`, { method: "POST", body: { archived } }),
   deleteCondition: (patientId, conditionId) =>
-    request(`/api/patients/${patientId}/conditions/${conditionId}`, { method: "DELETE", body: {} }),
+    request(withDevice(`/api/patients/${patientId}/conditions/${conditionId}`), { method: "DELETE", body: {} }),
   addExisting: (patientId, conditionIds) => request("/api/today/entries", { method: "POST", body: { patientId, conditionIds } }),
   entry: (id) => request(withDevice(`/api/entries/${id}`)),
   addCondition: (id, name) => request(`/api/entries/${id}/conditions`, { method: "POST", body: { name } }),
   setChief: (id, targetId, side) => request(`/api/entries/${id}/chief`, { method: "POST", body: { targetId, side } }),
   addItem: (id, targetId, side) => request(`/api/entries/${id}/items`, { method: "POST", body: { targetId, side } }),
-  patchItem: (id, itemId, patch) => request(`/api/entries/${id}/items/${itemId}`, { method: "PATCH", body: { patch } }),
-  removeItem: (id, itemId) => request(`/api/entries/${id}/items/${itemId}`, { method: "DELETE", body: {} }),
+  patchItem: (id, itemId, patch, expectedVersion) =>
+    request(`/api/entries/${id}/items/${itemId}`, {
+      method: "PATCH",
+      body: { patch, ...(expectedVersion != null ? { expectedVersion } : {}) },
+    }),
+  removeItem: (id, itemId) => request(withDevice(`/api/entries/${id}/items/${itemId}`), { method: "DELETE", body: {} }),
   // 撤销删除：把删除前的完整项快照插回原位（含派工与完成）。
   restoreItem: (id, index, item) =>
     request(`/api/entries/${id}/items/restore`, { method: "POST", body: { index, item } }),
-  reorder: (id, orderedIds) => request(`/api/entries/${id}/reorder`, { method: "POST", body: { orderedIds } }),
-  assignAll: (id, assigneeId) => request(`/api/entries/${id}/assign-all`, { method: "POST", body: { assigneeId } }),
+  reorder: (id, orderedIds, expectedVersion) =>
+    request(`/api/entries/${id}/reorder`, {
+      method: "POST",
+      body: { orderedIds, ...(expectedVersion != null ? { expectedVersion } : {}) },
+    }),
+  assignAll: (id, assigneeId, expectedVersion) =>
+    request(`/api/entries/${id}/assign-all`, {
+      method: "POST",
+      body: { assigneeId, ...(expectedVersion != null ? { expectedVersion } : {}) },
+    }),
   includeCondition: (id, conditionId) => request(`/api/entries/${id}/include`, { method: "POST", body: { conditionId } }),
   setFocus: (id, conditionId) => request(`/api/entries/${id}/focus`, { method: "POST", body: { conditionId } }),
   dropEntry: (id) => request(`/api/entries/${id}/drop`, { method: "POST", body: {} }),

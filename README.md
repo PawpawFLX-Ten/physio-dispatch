@@ -10,6 +10,9 @@
 - **名单加项**：不转模型，搜肌肉名或拼音首字母直接加项，深层肌肉（肩袖等被盖住的）也点得到；`client/src/pinyin.js`。
 - **说一句快速开单**：`shared/quick-order.js` 的封闭词表解析器（32 目标同义词 + 手法 + 方向 + 左右双 + 中文数字），一句话变清单，语音靠手机键盘自带的话筒，不需要任何模型。
 - **照上次的单**：一键复制病人最近一天的实际单（含顺序和派给谁），`POST /api/today/entries/repeat-last`。
+- **把昨天未完成接进今天**：只带未完成项与派工，`POST /api/today/entries/carry-unfinished`（与整单照旧区分）。
+- **多机冲突**：今日单条目带单调版本号；重排 / 全部派给 / 改项可带期望版本，冲突返回 409 并让客户端重拉。
+- **派给我的一键完成**：今日单「派给我的」可对当前项直接完成（失败保持未完成）。
 - **来过几次**：加入病人时显示「上次做了」摘要；病人页「来过几次」看全部历史（`visitHistory`，最近 12 次）。
 - **打印交班单**：今日单顶部「打印」，按人分组的一页纸，含进度和红字提醒（`.print-sheet` + `@media print`）。
 - **按人视图**：今日单第三个标签，主治一眼看谁手里多少活；未派的排最后。
@@ -40,6 +43,8 @@ npm run dev
 
 局域网是明文 HTTP，不要连公共 Wi‑Fi。加到主屏幕只在 HTTPS 下才有完整离线缓存；普通局域网地址用浏览器打开即可。
 
+微信里也能直接打开：把地址发给微信或收藏，内置浏览器可用（含明文 HTTP 局域网地址）。微信里没有「加到主屏幕」的完整体验，且切走/锁屏后回来会自动重新拉一次数据；想要离线缓存和主屏图标，用系统浏览器 + HTTPS。
+
 同一浏览器的两个标签是同一台手机。要在电脑上模拟两台手机，用两个浏览器，或给地址加上 `?device=1` 和 `?device=2`。
 
 第一台打开的手机写下自己的名字。之后的手机点「我是谁」选名字或加新名字。关掉页面后仍会记住这台手机。
@@ -51,7 +56,22 @@ npm run build
 npm start
 ```
 
-页面和接口都在 `http://<电脑IP>:8787/`。
+或一键（缺依赖/缺 dist 时会先装再打包）：
+
+```bash
+./scripts/start-clinic.sh
+```
+
+页面和接口都在 `http://<电脑IP>:8787/`。终端会打印局域网地址。
+
+Linux 开机自启（用户级 systemd，路径为仓库实际位置）：
+
+```bash
+./scripts/install-user-systemd.sh
+# 或 CLINIC_ROOT=/path/to/repo ./scripts/install-user-systemd.sh
+```
+
+示例单元：`deploy/physio-dispatch.service`。
 
 可选 HTTPS（手机添加到主屏幕需要）：
 
@@ -65,9 +85,26 @@ TLS_KEY=data/server.key TLS_CERT=data/server.crt npm start
 
 - 全部数据只在 `data/clinic.json`，不上云、不经第三方。
 - 每次保存前自动抄一份到 `data/backups/`：最近 30 份分钟级 + 每天 1 份保留 30 天。
-- 今日单 → 设置 → **导出** 下载完整 JSON；**导入** 会替换本机全部数据（二次确认，需本机已绑定员工）。
+- 可选环境变量 `BACKUP_MIRROR_DIR`：有则在自动备份时再复制一份到该目录（缺省不启用）。
+- 今日单 → 设置 → **导出** 下载完整 JSON（会记上次导出时间，超过约 7 天提醒）；**导入** 会替换本机全部数据（二次确认，需本机已绑定员工）。
 - 也可直接 `GET /api/data/export?deviceId=…` / `POST /api/data/import`。
 - 谁改了什么记在 `data/audit.log`（超 5MB 自动轮转）。
+
+## 浏览器 UI 回归（可选）
+
+默认 `npm test` 只跑 Node 单测，不含浏览器。需要本机已开开发服务，并用支持 BiDi 的浏览器（默认连 `ws://127.0.0.1:9222/session`）：
+
+```bash
+# 终端 1：临时数据目录起开发服务
+DATA_DIR=$(mktemp -d) npm run dev
+
+# 另开带远程调试的 Chromium / Chrome，例如：
+# chromium --remote-debugging-port=9222
+
+npm run test:ui
+```
+
+环境变量：`BIDI`（BiDi WebSocket）、`CLINIC_DATA`（校验用的 clinic.json 路径）。跑不起来通常是浏览器 BiDi 未开或开发服务未在 5173。
 
 ## 模型和图标
 
