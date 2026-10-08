@@ -1,4 +1,4 @@
-// 数据层入口：一个 ClinicStore 类，方法按领域放在旁边的文件里（io / auth / views / entries / templates）。
+// 数据层入口：一个 ClinicStore 类，方法按领域放在旁边的文件里（io / auth / views / entries / templates / pairings）。
 // 对外的接口不变：index.js 和测试仍然从这里拿 ClinicStore 和 todayKey。
 import { emptyState } from "./helpers.js"
 import { ioMethods } from "./io.js"
@@ -6,6 +6,7 @@ import { authMethods } from "./auth.js"
 import { viewMethods } from "./views.js"
 import { entryMethods } from "./entries.js"
 import { templateMethods } from "./templates.js"
+import { pairingMethods } from "./pairings.js"
 
 export { todayKey } from "./helpers.js"
 
@@ -36,4 +37,4 @@ export class ClinicStore {
   }
 }
 
-Object.assign(ClinicStore.prototype, ioMethods, authMethods, viewMethods, entryMethods, templateMethods)
+Object.assign(ClinicStore.prototype, ioMethods, authMethods, viewMethods, entryMethods, templateMethods, pairingMethods)

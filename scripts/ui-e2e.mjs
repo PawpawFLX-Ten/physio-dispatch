@@ -279,6 +279,30 @@ try {
   await clickButton(doctor.page, "收起")
   console.log("3c 点已标记肌肉出组：通过")
 
+  // 常见搭配：主诉（膝盖）定了，加项面板亮出该部位常用肌肉芯片，点一下直接加项。
+  await clickButton(doctor.page, "加项")
+  await waitText(doctor.page, ["常见搭配", "股四头肌"])
+  const chipClicked = await run(doctor.page, `
+    const chip = [...document.querySelectorAll(".pairing-chip")].find((b) => b.textContent.includes("股四头肌"))
+    if (!chip) return false
+    chip.click()
+    return true
+  `)
+  if (!chipClicked) throw new Error("加项面板里没有股四头肌芯片")
+  await sleep(400)
+  // 芯片自己也叫股四头肌，得分清：看治疗单行里是不是真多了一项。
+  let quadOnList = false
+  for (let attempt = 0; attempt < 20 && !quadOnList; attempt += 1) {
+    quadOnList = await run(
+      doctor.page,
+      `return [...document.querySelectorAll(".patient-target")].some((node) => node.textContent.includes("股四头肌"))`,
+    )
+    if (!quadOnList) await sleep(100)
+  }
+  if (!quadOnList) throw new Error("点芯片没有把股四头肌加进治疗单")
+  await clickButton(doctor.page, "收起")
+  console.log("3d 常见搭配芯片一键加项：通过")
+
   await clickButton(doctor.page, "返回")
   await waitText(doctor.page, ["今日单", "王阿姨"])
   await clickButton(doctor.page, "王阿姨")
@@ -322,7 +346,9 @@ try {
   const clinic = JSON.parse(fs.readFileSync(path.join(dataDir, "clinic.json")))
   const savedPatient = clinic.patients.find((patient) => patient.name === "王阿姨")
   const savedOrder = savedPatient.conditions[0].items.map((item) => item.targetId)
-  if (savedOrder.join(">") !== "hamstring>soleus>plantar>lumbar") {
+  // 新鲜病症第一次离开病人页时静默归档当天这套（含 3d 芯片加的股四头肌），
+  // 之后派工/完成/拖动都不再写回。
+  if (savedOrder.join(">") !== "hamstring>soleus>plantar>lumbar>quad") {
     throw new Error(`病症被改写了：${savedOrder.join(">")}`)
   }
   if (savedPatient.conditions[0].items.some((item) => item.assigneeId || item.done)) {

@@ -1,5 +1,6 @@
 // 读侧：把 state 投影成各页面要的样子。
 import { targetById, targetTitle } from "../shared/catalog.js"
+import { mergedPairings } from "../shared/pairings.js"
 import { entryVersion, fail, todayKey, workSignature } from "./helpers.js"
 
 export const viewMethods = {
@@ -20,6 +21,8 @@ export const viewMethods = {
       patients: this.patientList(),
       templates: this.templateList(),
       lastExportAt: typeof this.state.lastExportAt === "string" ? this.state.lastExportAt : null,
+      // 常见搭配：设置里改过的覆盖默认，加项面板照这张表出芯片。
+      pairings: mergedPairings(this.state.pairings),
     }
   },
 

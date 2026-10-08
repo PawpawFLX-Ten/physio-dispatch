@@ -16,6 +16,7 @@ import {
 import { matchesInitials } from "../pinyin.js"
 import { parseQuickOrder } from "@shared/quick-order.js"
 import { itemsOnSpot } from "@shared/body-marks.js"
+import { PairingChips } from "../PairingChips.jsx"
 import { useBackLayer } from "../back-layer.js"
 import { BodyStage } from "./BodyStage.jsx"
 import "./patient.css"
@@ -136,7 +137,8 @@ function ChoiceButton({ target, side, pending, onPick }) {
 
 // 名单点选：不转模型也能加项，深层肌肉（肩袖这类被盖住的）在这里点。
 // 顶上「说一句」把整句话直接变成清单，说话靠键盘自带的语音输入。
-function ListPicker({ entry, pending, notice, query, onQuery, onPickSite, onPickWork, onQuickAdd, onClose }) {
+// 主诉定了以后，紧跟一行常见搭配芯片：点一下就按主诉那一侧加项。
+function ListPicker({ entry, pairings, pending, notice, query, onQuery, onPickSite, onPickWork, onQuickAdd, onClose }) {
   const [quickText, setQuickText] = useState("")
   const sheetSearchRef = useRef(null)
   const parsed = useMemo(() => parseQuickOrder(quickText), [quickText])
@@ -151,6 +153,11 @@ function ListPicker({ entry, pending, notice, query, onQuery, onPickSite, onPick
     [query],
   )
   const sideTags = (target) => (hasSides(target) ? ["left", "right"] : [null])
+  const pairingIds = pairings?.[entry?.chiefSiteId] || []
+  const addedSpots = useMemo(
+    () => new Set((entry?.items || []).map((item) => `${item.targetId}:${item.side || ""}`)),
+    [entry],
+  )
 
   return (
     <Sheet title="加项" onClose={onClose}>
@@ -206,6 +213,18 @@ function ListPicker({ entry, pending, notice, query, onQuery, onPickSite, onPick
           >
             {parsed.items.length ? `加 ${parsed.items.length} 项` : "只记要治的地方"}
           </button>
+        </div>
+      ) : null}
+      {pairingIds.length && !needSite ? (
+        <div className="patient-pairing-block">
+          <p className="patient-label">常见搭配</p>
+          <PairingChips
+            ids={pairingIds}
+            side={entry.chiefSide}
+            added={addedSpots}
+            disabled={pending}
+            onPick={(targetId, side) => onPickWork(targetId, side)}
+          />
         </div>
       ) : null}
       <input
@@ -557,6 +576,8 @@ export function PatientDay({ entryId, pulse, onBack }) {
   const [entry, setEntry] = useState(null)
   const [staff, setStaff] = useState([])
   const [patients, setPatients] = useState([])
+  // 常见搭配表：随 entryView 一起来，加项面板照它出芯片。
+  const [pairings, setPairings] = useState({})
   // 名单只有一个人时收起全部派工界面：项目自动记在那人名下（服务端本来就会这么派）。
   const solo = staff.length === 1
   const [templates, setTemplates] = useState([])
@@ -631,6 +652,7 @@ export function PatientDay({ entryId, pulse, onBack }) {
     if (result.staff) setStaff(result.staff)
     if (result.patients) setPatients(result.patients)
     if (result.templates) setTemplates(result.templates)
+    if (result.pairings) setPairings(result.pairings)
     if (Object.prototype.hasOwnProperty.call(result, "me")) setMe(result.me)
   }, [])
 
@@ -1799,6 +1821,7 @@ export function PatientDay({ entryId, pulse, onBack }) {
       {listOpen && !leaveAsk ? (
         <ListPicker
           entry={entry}
+          pairings={pairings}
           pending={pending}
           notice={notice}
           query={listQuery}

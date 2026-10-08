@@ -1243,3 +1243,37 @@ test("merely reading the session no longer leaves an empty day behind", () => {
   store.createPatient({ deviceId: "doc", name: "李叔", conditionName: "腰紧" })
   assert.ok(store.state.days[todayKey()])
 })
+
+test("pairings: view falls back to defaults, savePairings sanitizes and persists", () => {
+  const store = openStore()
+  setupRoom(store)
+  // 没改过：view 给默认表
+  let view = store.view("doc")
+  assert.equal(view.pairings.knee[0], "quad")
+  assert.equal(view.pairings.lumbar.includes("glute"), true)
+  // 改膝盖：脏数据（重复、不认识的 id、部位键塞肌肉、超长）都洗掉，别的部位回默认
+  const noisy = Array.from({ length: 20 }, () => "quad").concat(["knee", "没这块肉"])
+  view = store.savePairings({ deviceId: "doc", pairings: { knee: noisy, hamster: ["quad"] } })
+  assert.deepEqual(view.pairings.knee, ["quad"])
+  assert.equal("hamster" in view.pairings, false)
+  assert.equal(view.pairings.neck[0], "trapezius")
+  // 没登录的设备改不了
+  assert.throws(() => store.savePairings({ deviceId: "nobody", pairings: { knee: ["quad"] } }), /请先选择你是谁/)
+  // 空表（一个部位都不剩）直接拒绝
+  assert.throws(() => store.savePairings({ deviceId: "doc", pairings: { hamster: ["quad"] } }), /没有认得的部位/)
+  // 存盘再读回来还是改过的
+  const revived = new ClinicStore(store.file)
+  revived.load()
+  assert.deepEqual(revived.view("doc").pairings.knee, ["quad"])
+  assert.equal(revived.view("doc").pairings.lumbar[0], "glute")
+})
+
+test("pairings: sanitizeState keeps the edited table on import, empty chips allowed", () => {
+  const store = openStore()
+  setupRoom(store)
+  store.savePairings({ deviceId: "doc", pairings: { knee: [], lumbar: ["glute", "glute", " quad "] } })
+  const view = store.view("doc")
+  // 膝盖清空是合法的（面板就不显示这一排）；带空格的 id 洗掉而不是猜
+  assert.deepEqual(view.pairings.knee, [])
+  assert.deepEqual(view.pairings.lumbar, ["glute"])
+})

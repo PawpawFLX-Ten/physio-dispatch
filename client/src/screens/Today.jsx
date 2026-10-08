@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { api } from "../api.js"
+import { TARGETS, allowsWork, targetById } from "@shared/catalog.js"
+import { CHIEF_SITES, DEFAULT_PAIRINGS } from "@shared/pairings.js"
 import { matchesInitials } from "../pinyin.js"
+import { PairingChips } from "../PairingChips.jsx"
 import { useBackLayer } from "../back-layer.js"
 import "./today.css"
 
@@ -29,6 +32,10 @@ export function Today({ snap, onRefresh, onOpen }) {
   const [query, setQuery] = useState("")
   const [templatePick, setTemplatePick] = useState(null)
   const [templateName, setTemplateName] = useState("")
+  // 常见搭配编辑器：draft 为 null 是收起状态；site 是正在编辑的部位页签。
+  const [pairingDraft, setPairingDraft] = useState(null)
+  const [pairingSite, setPairingSite] = useState(CHIEF_SITES[0])
+  const [pairingQuery, setPairingQuery] = useState("")
   const importRef = useRef(null)
   // ref 当同步守卫拦双击，state 让按钮变灰看得见。
   const pendingRef = useRef(false)
@@ -696,6 +703,127 @@ export function Today({ snap, onRefresh, onOpen }) {
                     加名字并切换
                   </button>
                 </form>
+                <h3>常见搭配</h3>
+                {pairingDraft ? (
+                  <>
+                    <p className="muted">
+                      预览就是加项面板里那一排的样子。下面的芯片点一下去掉、再下面搜到点一下加入，改完记得保存。
+                    </p>
+                    <div className="pairing-sites">
+                      {CHIEF_SITES.map((site) => (
+                        <button
+                          key={site}
+                          type="button"
+                          className={site === pairingSite ? "pairing-site is-on" : "pairing-site"}
+                          onClick={() => {
+                            setPairingSite(site)
+                            setPairingQuery("")
+                          }}
+                        >
+                          {targetById(site)?.name || site}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="patient-label">预览</p>
+                    {pairingDraft[pairingSite]?.length ? (
+                      <PairingChips ids={pairingDraft[pairingSite]} />
+                    ) : (
+                      <p className="muted">这个部位不显示搭配。</p>
+                    )}
+                    <p className="patient-label">当前搭配 · 点一下去掉</p>
+                    <PairingChips
+                      ids={pairingDraft[pairingSite]}
+                      disabled={pending}
+                      onPick={(targetId) => {
+                        setPairingDraft((draft) => ({
+                          ...draft,
+                          [pairingSite]: draft[pairingSite].filter((item) => item !== targetId),
+                        }))
+                      }}
+                    />
+                    <input
+                      className="patient-search"
+                      type="search"
+                      value={pairingQuery}
+                      placeholder="搜肌肉加入，可输拼音首字母"
+                      aria-label="搜肌肉加入搭配"
+                      onChange={(event) => setPairingQuery(event.target.value)}
+                    />
+                    {(() => {
+                      const current = new Set(pairingDraft[pairingSite])
+                      const ids = TARGETS.filter(
+                        (target) =>
+                          allowsWork(target) &&
+                          !current.has(target.id) &&
+                          matchesInitials(pairingQuery, target.name),
+                      )
+                        .slice(0, 30)
+                        .map((target) => target.id)
+                      return (
+                        <PairingChips
+                          ids={ids}
+                          disabled={pending}
+                          onPick={(targetId) => {
+                            setPairingDraft((draft) => ({
+                              ...draft,
+                              [pairingSite]: [...draft[pairingSite], targetId].slice(0, 12),
+                            }))
+                          }}
+                        />
+                      )
+                    })()}
+                    <div className="today-template-buttons">
+                      <button
+                        type="button"
+                        className="primary"
+                        disabled={pending}
+                        onClick={() =>
+                          run(async () => {
+                            await api.savePairings(pairingDraft)
+                            setPairingDraft(null)
+                            await onRefresh()
+                          })
+                        }
+                      >
+                        保存搭配
+                      </button>
+                      <button
+                        type="button"
+                        className="secondary"
+                        disabled={pending}
+                        onClick={() => setPairingDraft(structuredClone(DEFAULT_PAIRINGS))}
+                      >
+                        恢复默认
+                      </button>
+                      <button
+                        type="button"
+                        className="secondary"
+                        disabled={pending}
+                        onClick={() => setPairingDraft(null)}
+                      >
+                        收起
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <p className="muted">
+                      要治的地方定了以后，加项面板会亮出一排这个部位常用的肌肉，点一下就加项。
+                    </p>
+                    <div className="today-template-buttons">
+                      <button
+                        type="button"
+                        className="secondary"
+                        onClick={() => {
+                          setPairingDraft(structuredClone(snap.pairings || DEFAULT_PAIRINGS))
+                          setPairingQuery("")
+                        }}
+                      >
+                        改搭配
+                      </button>
+                    </div>
+                  </>
+                )}
                 {archivedPatients.length ? (
                   <>
                     <h3>已归档病人</h3>

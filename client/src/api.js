@@ -72,6 +72,8 @@ export const api = {
   deleteTemplate: (templateId) => request(withDevice(`/api/templates/${templateId}`), { method: "DELETE", body: {} }),
   applyTemplateToEntry: (entryId, templateId) =>
     request(`/api/entries/${entryId}/apply-template`, { method: "POST", body: { templateId } }),
+  // 常见搭配：整张表一次存下，覆盖默认。
+  savePairings: (pairings) => request("/api/pairings", { method: "POST", body: { pairings } }),
   quickAdd: (entryId, parsed) =>
     request(`/api/entries/${entryId}/quick-add`, { method: "POST", body: parsed }),
   repeatLastDay: (patientId) =>

@@ -64,6 +64,7 @@ app.delete(
   ),
 )
 app.post("/api/templates", asyncRoute((req) => store.saveTemplateFromEntry(req.body)))
+app.post("/api/pairings", asyncRoute((req) => store.savePairings(req.body)))
 app.delete(
   "/api/templates/:id",
   asyncRoute((req) => store.deleteTemplate({ deviceId: req.body?.deviceId || req.query?.deviceId, templateId: req.params.id })),

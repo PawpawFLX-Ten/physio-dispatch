@@ -1,0 +1,56 @@
+/* 常见搭配芯片：加项面板与设置编辑器共用（PairingChips.jsx 自带引入）。 */
+.pairing-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 6px 0 2px;
+}
+
+.pairing-chip {
+  margin: 0;
+  padding: 0 12px;
+  min-height: 34px;
+  border: 0;
+  border-radius: 999px;
+  background: #fffdf8;
+  box-shadow: inset 0 0 0 1px #e4dccb;
+  color: #5e584e;
+  font-size: 14px;
+}
+
+.pairing-chip.is-on {
+  background: #0f5f5c;
+  color: #f6f1e7;
+  box-shadow: none;
+}
+
+.pairing-chip.is-static {
+  display: inline-block;
+  line-height: 34px;
+}
+
+/* 设置编辑器：部位页签 */
+.pairing-sites {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 6px 0;
+}
+
+.pairing-site {
+  margin: 0;
+  padding: 0 14px;
+  min-height: 34px;
+  border: 0;
+  border-radius: 999px;
+  background: #fffdf8;
+  box-shadow: inset 0 0 0 1px #e4dccb;
+  font-size: 14px;
+  color: #5e584e;
+}
+
+.pairing-site.is-on {
+  background: #0f5f5c;
+  color: #f6f1e7;
+  box-shadow: none;
+}

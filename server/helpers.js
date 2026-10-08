@@ -1,6 +1,7 @@
 // 数据层的纯函数和公共小工具：不碰 this、不碰文件。
 import crypto from "node:crypto"
 import { DIRECTIONS, TECHNIQUES, defaultDose } from "../shared/catalog.js"
+import { sanitizePairings } from "../shared/pairings.js"
 
 export function id() {
   return crypto.randomUUID()
@@ -25,6 +26,8 @@ export function emptyState() {
     templates: [],
     days: {},
     lastExportAt: null,
+    // 常见搭配表：null = 没在设置里改过，读侧回退 shared/pairings.js 的默认。
+    pairings: null,
   }
 }
 
@@ -207,7 +210,7 @@ export function sanitizeState(data) {
   }
   const lastExportAt =
     typeof data.lastExportAt === "string" && data.lastExportAt.trim() ? data.lastExportAt.trim() : null
-  return { staff, devices, patients, templates, days, lastExportAt }
+  return { staff, devices, patients, templates, days, lastExportAt, pairings: sanitizePairings(data.pairings) }
 }
 
 // 磁盘读回来的数据只做「形状扶正」：不删还看得懂的历史，只补上会让读侧崩掉的洞
@@ -257,5 +260,7 @@ export function normalizeLoadedState(data) {
       })),
     days,
     lastExportAt: typeof data.lastExportAt === "string" ? data.lastExportAt : null,
+    pairings:
+      data.pairings && typeof data.pairings === "object" && !Array.isArray(data.pairings) ? data.pairings : null,
   }
 }
