@@ -273,44 +273,47 @@ export function Today({ snap, onRefresh, onOpen }) {
           </span>
         </p>
         {banner ? <p className="error">{banner}</p> : null}
-        <div className="today-tabs" role="tablist">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={!mineOnly && !staffView}
-            className={!mineOnly && !staffView ? "today-tab is-on" : "today-tab"}
-            onClick={() => {
-              setMineOnly(false)
-              setStaffView(false)
-            }}
-          >
-            全部
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={mineOnly}
-            className={mineOnly ? "today-tab is-on" : "today-tab"}
-            onClick={() => {
-              setMineOnly(true)
-              setStaffView(false)
-            }}
-          >
-            派给我的{mineCount ? ` ${mineCount}` : ""}
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={staffView}
-            className={staffView ? "today-tab is-on" : "today-tab"}
-            onClick={() => {
-              setStaffView(true)
-              setMineOnly(false)
-            }}
-          >
-            按人
-          </button>
-        </div>
+        {/* 名单只有一个人时收起派工标签：没有「派给我的」「按人」，整栏都不要。 */}
+        {(snap.staff?.length || 0) > 1 ? (
+          <div className="today-tabs" role="tablist">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={!mineOnly && !staffView}
+              className={!mineOnly && !staffView ? "today-tab is-on" : "today-tab"}
+              onClick={() => {
+                setMineOnly(false)
+                setStaffView(false)
+              }}
+            >
+              全部
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mineOnly}
+              className={mineOnly ? "today-tab is-on" : "today-tab"}
+              onClick={() => {
+                setMineOnly(true)
+                setStaffView(false)
+              }}
+            >
+              派给我的{mineCount ? ` ${mineCount}` : ""}
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={staffView}
+              className={staffView ? "today-tab is-on" : "today-tab"}
+              onClick={() => {
+                setStaffView(true)
+                setMineOnly(false)
+              }}
+            >
+              按人
+            </button>
+          </div>
+        ) : null}
       </header>
       <div className="today-scroll" ref={scrollRef}>
         <div className="pull-label" style={{ height: shown }} aria-live="polite">

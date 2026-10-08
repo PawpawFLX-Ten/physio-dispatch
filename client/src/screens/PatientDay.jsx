@@ -256,7 +256,7 @@ function ListPicker({ entry, pending, notice, query, onQuery, onPickSite, onPick
   )
 }
 
-function TreatmentRow({ item, index, current, dragging, offsetY, swipeX, onToggle, onAssign, onRowPointerDown, onHandlePointerDown }) {
+function TreatmentRow({ item, index, current, solo, dragging, offsetY, swipeX, onToggle, onAssign, onRowPointerDown, onHandlePointerDown }) {
   const transform = dragging
     ? `translate3d(0, ${offsetY}px, 0)`
     : swipeX
@@ -282,16 +282,18 @@ function TreatmentRow({ item, index, current, dragging, offsetY, swipeX, onToggl
           </div>
           <p className="patient-meta">{itemLine(item)}</p>
         </div>
-        <button
-          type="button"
-          className={item.assigneeId ? "patient-who" : "patient-who is-empty"}
-          data-stop=""
-          aria-label={item.assigneeName ? `派给 ${item.assigneeName}` : "派给谁"}
-          onPointerDown={(event) => event.stopPropagation()}
-          onClick={onAssign}
-        >
-          {item.assigneeName || "未派"}
-        </button>
+        {!solo ? (
+          <button
+            type="button"
+            className={item.assigneeId ? "patient-who" : "patient-who is-empty"}
+            data-stop=""
+            aria-label={item.assigneeName ? `派给 ${item.assigneeName}` : "派给谁"}
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={onAssign}
+          >
+            {item.assigneeName || "未派"}
+          </button>
+        ) : null}
         <button
           type="button"
           className={item.done ? "patient-done is-done" : "patient-done"}
@@ -317,7 +319,7 @@ function TreatmentRow({ item, index, current, dragging, offsetY, swipeX, onToggl
   )
 }
 
-function PlanList({ items, currentIndex, onToggle, onAssign, onOpen, onRemove, onReorder }) {
+function PlanList({ items, currentIndex, solo, onToggle, onAssign, onOpen, onRemove, onReorder }) {
   const [preview, setPreview] = useState(null)
   const [draggingId, setDraggingId] = useState(null)
   const [dragY, setDragY] = useState(0)
@@ -521,6 +523,7 @@ function PlanList({ items, currentIndex, onToggle, onAssign, onOpen, onRemove, o
           item={item}
           index={index}
           current={index === currentIndex && !item.done}
+          solo={solo}
           dragging={draggingId === item.id}
           offsetY={draggingId === item.id ? dragY : 0}
           swipeX={swipeOffset?.id === item.id ? swipeOffset.dx : 0}
@@ -554,6 +557,8 @@ export function PatientDay({ entryId, pulse, onBack }) {
   const [entry, setEntry] = useState(null)
   const [staff, setStaff] = useState([])
   const [patients, setPatients] = useState([])
+  // 名单只有一个人时收起全部派工界面：项目自动记在那人名下（服务端本来就会这么派）。
+  const solo = staff.length === 1
   const [templates, setTemplates] = useState([])
   const [me, setMe] = useState(null)
   const [notice, setNotice] = useState(blankNotice)
@@ -1215,6 +1220,7 @@ export function PatientDay({ entryId, pulse, onBack }) {
         <PlanList
           items={entry.items || []}
           currentIndex={firstUndone}
+          solo={solo}
           onToggle={(item) =>
             mutate(() => withVersion((v) => api.patchItem(entryId, item.id, { done: !item.done }, v)), {
               fail: "未能保存",
@@ -1257,7 +1263,7 @@ export function PatientDay({ entryId, pulse, onBack }) {
           >
             加项
           </button>
-          {entry.items?.length > 0 ? (
+          {entry.items?.length > 0 && !solo ? (
             <button
               type="button"
               className="secondary"
@@ -1517,15 +1523,17 @@ export function PatientDay({ entryId, pulse, onBack }) {
                       .join(" · ")}
                   </span>
                 </button>
-                <button
-                  type="button"
-                  className={item.assigneeId ? "patient-who" : "patient-who is-empty"}
-                  disabled={pending}
-                  aria-label={item.assigneeName ? `派给 ${item.assigneeName}` : "派给谁"}
-                  onClick={() => setItemAssignId(item.id)}
-                >
-                  {item.assigneeName || "未派"}
-                </button>
+                {!solo ? (
+                  <button
+                    type="button"
+                    className={item.assigneeId ? "patient-who" : "patient-who is-empty"}
+                    disabled={pending}
+                    aria-label={item.assigneeName ? `派给 ${item.assigneeName}` : "派给谁"}
+                    onClick={() => setItemAssignId(item.id)}
+                  >
+                    {item.assigneeName || "未派"}
+                  </button>
+                ) : null}
               </div>
             ))}
           </div>

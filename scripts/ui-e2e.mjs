@@ -400,12 +400,43 @@ try {
   await fill(soloDoctor.page, "我的名字", "独立医生")
   await clickButton(soloDoctor.page, "进入治疗室")
   await waitText(soloDoctor.page, ["今日单", "独立医生"])
+  // 加个病人和一项：单人时派工界面收起，项目自动记在唯一的人名下。
+  await clickButton(soloDoctor.page, "加入病人")
+  await waitText(soloDoctor.page, ["新病人"])
+  await fill(soloDoctor.page, "姓名", "赵阿姨")
+  await fill(soloDoctor.page, "病症名称", "腰紧")
+  await clickButton(soloDoctor.page, "开始点选")
+  await waitText(soloDoctor.page, ["赵阿姨", "先点要治的地方"])
+  await clickButton(soloDoctor.page, "加项")
+  await run(soloDoctor.page, `
+    const input = document.querySelector(".patient-quick-input")
+    const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set
+    set.call(input, "右腰 臀部松解8分钟")
+    input.dispatchEvent(new Event("input", { bubbles: true }))
+  `)
+  await sleep(300)
+  await clickButton(soloDoctor.page, "加 1 项")
+  await waitText(soloDoctor.page, ["松解", "8 分钟"])
+  const soloUiHidden = await run(
+    soloDoctor.page,
+    `const text = document.body.innerText; return !text.includes("全部派给") && !text.includes("未派")`,
+  )
+  if (!soloUiHidden) throw new Error("单人时病人页还露着派工界面")
+  const soloClinic = JSON.parse(fs.readFileSync(path.join(soloDir, "clinic.json")))
+  const soloStaff = soloClinic.staff[0]
+  const soloEntry = Object.values(soloClinic.days)[0].entries[0]
+  if (soloEntry.items.some((item) => item.assigneeId !== soloStaff.id)) {
+    throw new Error("单人模式下加项没有自动派给唯一的人")
+  }
   const soloSecond = await context()
   await soloSecond.page.goto(`${soloBase}/?device=10`, { waitUntil: "load" })
-  await waitText(soloSecond.page, ["今日单", "今天还没有病人"])
-  const askedWho = await run(soloSecond.page, `return document.body.innerText.includes("今天你是谁")`)
-  if (askedWho) throw new Error("单人治疗室还在问身份")
-  console.log("8 单人治疗室免选身份，打开就是今日单：通过")
+  await waitText(soloSecond.page, ["今日单", "赵阿姨"])
+  const secondSees = await run(
+    soloSecond.page,
+    `const text = document.body.innerText; return !text.includes("今天你是谁") && !text.includes("派给我的") && !text.includes("按人")`,
+  )
+  if (!secondSees) throw new Error("单人时还在问身份或露出派工标签")
+  console.log("8 单人免选身份 + 派工界面自动收起：通过")
 
   console.log("UI_E2E_OK")
   fs.rmSync(dataDir, { recursive: true, force: true })
