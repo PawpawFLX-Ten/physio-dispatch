@@ -38,6 +38,7 @@ export const TARGETS = [
   { id: "fdl", name: "趾长屈肌", kind: "muscle" },
   // 肩背与颈
   { id: "trapezius", name: "斜方肌", kind: "muscle" },
+  { id: "erector-spinae", name: "竖脊肌", kind: "muscle" },
   { id: "levator-scap", name: "肩胛提肌", kind: "muscle" },
   { id: "rhomboid", name: "菱形肌", kind: "muscle" },
   { id: "serratus", name: "前锯肌", kind: "muscle" },

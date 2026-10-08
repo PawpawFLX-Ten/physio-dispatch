@@ -27,6 +27,7 @@ const TARGET_ALIASES = [
   ["趾长伸肌", "edl"],
   ["趾长屈肌", "fdl"],
   ["斜方肌", "trapezius"], ["斜方", "trapezius"],
+  ["竖脊肌", "erector-spinae"], ["竖脊", "erector-spinae"], ["脊柱两侧", "erector-spinae"],
   ["肩胛提肌", "levator-scap"],
   ["菱形肌", "rhomboid"], ["菱形", "rhomboid"],
   ["前锯肌", "serratus"], ["前锯", "serratus"],

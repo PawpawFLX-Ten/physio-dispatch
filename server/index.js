@@ -151,7 +151,8 @@ app.get("/api/data/export", (req, res) => {
   }
 })
 
-const dist = path.join(root, "client", "dist")
+// DIST_DIR 给 e2e 用：打包到独立目录再起临时服务，测试永远不碰线上 dist。
+const dist = process.env.DIST_DIR ? path.resolve(process.env.DIST_DIR) : path.join(root, "client", "dist")
 if (fs.existsSync(path.join(dist, "index.html"))) {
   app.use(
     express.static(dist, {

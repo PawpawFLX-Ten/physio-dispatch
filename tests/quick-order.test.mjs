@@ -67,3 +67,10 @@ test("empty or garbage input yields nothing", () => {
   assert.deepEqual(parseQuickOrder("").items, [])
   assert.deepEqual(parseQuickOrder(",,,。。。").items, [])
 })
+
+test("erector spinae parses into its own work item", () => {
+  const parsed = parseQuickOrder("腰 竖脊肌松解10分钟")
+  assert.equal(parsed.chief.targetId, "lumbar")
+  assert.equal(parsed.items[0].targetId, "erector-spinae")
+  assert.equal(parsed.items[0].technique, "release")
+})

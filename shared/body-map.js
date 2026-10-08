@@ -80,7 +80,7 @@ const TARGET_BY_SLUG = {
   "teres-major": "teres-major",
 }
 
-// 竖脊肌一直延伸到颈根。只有靠下的两段算「腰」，上面的只作外形。
+// 竖脊肌一直延伸到颈根：靠下的两段贴着腰椎算「腰」，其余胸段是竖脊肌下手项。
 const LUMBAR_ERECTOR = new Set(["FJ1527", "FJ1527M", "FJ1535", "FJ1535M"])
 
 export function meshSlug(name) {
@@ -92,8 +92,9 @@ export function resolveMesh(name, file) {
   const slug = meshSlug(name)
   const fj = String(name || "").split(":").pop()
   if (slug === "erector-spinae") {
+    // 靠下的两段贴着腰椎算「要治腰」，胸段点出来是竖脊肌自己的下手项。
     if (LUMBAR_ERECTOR.has(fj)) return { kind: "pick", targetId: "lumbar", tissue: "muscle" }
-    return { kind: "context", tissue: "muscle" }
+    return { kind: "pick", targetId: "erector-spinae", tissue: "muscle" }
   }
   const targetId = TARGET_BY_SLUG[slug]
   if (targetId) {

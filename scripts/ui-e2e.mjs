@@ -19,14 +19,26 @@ function sleep(ms) {
 
 function buildClient() {
   if (process.env.SKIP_BUILD === "1") return
-  const result = spawnSync("npm", ["run", "build"], { cwd: root, stdio: "inherit" })
+  // 打包到独立的 dist-e2e，不碰线上正在服务的 client/dist。
+  const viteBin = path.join(root, "node_modules", "vite", "bin", "vite.js")
+  const result = spawnSync(
+    process.execPath,
+    [viteBin, "build", "--config", "client/vite.config.js", "--outDir", "dist-e2e"],
+    { cwd: root, stdio: "inherit" },
+  )
   if (result.status !== 0) throw new Error("前端打包失败，先解决 build 再跑 UI 回归")
 }
 
 async function startServer(dataDir) {
   const server = spawn(process.execPath, ["server/index.js"], {
     cwd: root,
-    env: { ...process.env, DATA_DIR: dataDir, PORT: String(PORT), HOST: "127.0.0.1" },
+    env: {
+      ...process.env,
+      DATA_DIR: dataDir,
+      PORT: String(PORT),
+      HOST: "127.0.0.1",
+      DIST_DIR: path.join(root, "client", "dist-e2e"),
+    },
     stdio: ["ignore", "pipe", "pipe"],
   })
   server.stdout.on("data", () => {})
@@ -382,7 +394,13 @@ try {
   const soloPort = PORT + 1
   soloServer = spawn(process.execPath, ["server/index.js"], {
     cwd: root,
-    env: { ...process.env, DATA_DIR: soloDir, PORT: String(soloPort), HOST: "127.0.0.1" },
+    env: {
+      ...process.env,
+      DATA_DIR: soloDir,
+      PORT: String(soloPort),
+      HOST: "127.0.0.1",
+      DIST_DIR: path.join(root, "client", "dist-e2e"),
+    },
     stdio: "ignore",
   })
   const soloBase = `http://127.0.0.1:${soloPort}`
