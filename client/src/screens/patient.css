@@ -89,6 +89,38 @@
   max-height: 100%;
 }
 
+/* 收起人体：清单占回整个下半屏，只留一条要治哪里的横幅。 */
+.patient-stage.is-tucked {
+  height: auto;
+  flex: 0 0 auto;
+}
+
+.patient-stage-tuck {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  z-index: 3;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: #fffdf8e6;
+  box-shadow: inset 0 0 0 1px #e4dccb;
+  color: #5e584e;
+  font-size: 14px;
+}
+
+.patient-stage-tucked {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 16px;
+  min-height: 44px;
+  background: #ebe4d6;
+  color: #5e584e;
+}
+
 .patient-hint {
   margin: 8px 16px 0;
   text-align: center;

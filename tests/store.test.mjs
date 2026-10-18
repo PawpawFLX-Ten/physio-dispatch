@@ -1391,3 +1391,29 @@ test("sanitizeState keeps divergedAcked through export/import", () => {
   const raw = store.todayRecord().entries[0]
   assert.equal(raw.divergedAcked, true)
 })
+
+test("carryUnunfinished finds yesterday's entry by id for the past-midnight phone", () => {
+  const store = openStore()
+  setupRoom(store)
+  const created = store.createPatient({ deviceId: "doc", name: "吴阿姨", conditionName: "踝扭伤" })
+  const entryId = created.entry.id
+  const patientId = created.entry.patientId
+  store.setChief({ deviceId: "doc", entryId, targetId: "knee" })
+  store.addItem({ deviceId: "doc", entryId, targetId: "gastroc" })
+  store.addItem({ deviceId: "doc", entryId, targetId: "soleus" })
+  const itemId = store.entryView("doc", entryId).entry.items[0].id
+  store.patchItem({ deviceId: "doc", entryId, itemId, patch: { done: true } })
+  store.leave({ deviceId: "doc", entryId, updateCondition: true })
+  // 模拟跨零点：今天这张单变成「昨天」的，手机上只剩 entryId。
+  const today = todayKey()
+  store.state.days["2000-01-01"] = store.state.days[today]
+  delete store.state.days[today]
+  const carried = store.carryUnfinished({ deviceId: "doc", entryId })
+  assert.equal(carried.entry.patientId, patientId)
+  // 已完成的腓肠肌不带，只接没做完的比目鱼肌
+  assert.deepEqual(
+    carried.entry.items.map((item) => item.targetId),
+    ["soleus"],
+  )
+  assert.throws(() => store.carryUnfinished({ deviceId: "doc", entryId }), /今天已经在单上/)
+})

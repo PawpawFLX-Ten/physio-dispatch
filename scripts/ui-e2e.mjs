@@ -479,6 +479,21 @@ try {
   await sleep(300)
   await clickButton(soloDoctor.page, "加 1 项")
   await waitText(soloDoctor.page, ["松解", "8 分钟"])
+  // 收起人体：清单占回整个下半屏，横幅仍显示要治哪里；展开即回。
+  await clickButton(soloDoctor.page, "收起人体")
+  if (!(await run(soloDoctor.page, `return Boolean(document.querySelector(".patient-stage-tucked"))`))) {
+    throw new Error("收起人体后没有出现横幅")
+  }
+  await clickButton(soloDoctor.page, "展开人体")
+  let expanded = false
+  for (let attempt = 0; attempt < 20 && !expanded; attempt += 1) {
+    expanded = await run(soloDoctor.page, `return Boolean(document.querySelector(".patient-stage-tuck"))`)
+    if (!expanded) {
+      await clickButton(soloDoctor.page, "展开人体").catch(() => {})
+      await sleep(150)
+    }
+  }
+  if (!expanded) throw new Error("展开人体没有恢复模型区")
   const soloUiHidden = await run(
     soloDoctor.page,
     `const text = document.body.innerText; return !text.includes("全部派给") && !text.includes("未派")`,

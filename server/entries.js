@@ -7,7 +7,7 @@ import {
   targetById,
   targetTitle,
 } from "../shared/catalog.js"
-import { assertExpectedVersion, bumpEntryVersion, fail, id, normalizeSide } from "./helpers.js"
+import { assertExpectedVersion, bumpEntryVersion, fail, id, normalizeSide, todayKey } from "./helpers.js"
 
 // 下手项的部位必须真实存在，且不能是纯部位（膝盖这类要先当作要治的地方）。
 // 点选、说一句、撤销插回三条路共用同一句报错。
@@ -118,16 +118,29 @@ export const entryMethods = {
   },
 
   // 把昨天未完成接进今天：只带未完成项与派工，不做完的项原样拷成已完成。
-  carryUnfinished({ deviceId, patientId }) {
+  // entryId 给跨零点还在病人页的手机用：那张单已属昨天，按 id 反查到病人再接。
+  carryUnfinished({ deviceId, patientId, entryId }) {
     this.requireStaff(deviceId)
-    const patient = this.patient(patientId)
-    if (this.todayRecord().entries.some((entry) => entry.patientId === patientId)) {
+    let who = patientId || null
+    if (!who && typeof entryId === "string" && entryId) {
+      const today = todayKey()
+      for (const [key, day] of Object.entries(this.state.days)) {
+        if (key >= today) continue
+        const found = (day?.entries || []).find((row) => row.id === entryId)
+        if (found) {
+          who = found.patientId
+          break
+        }
+      }
+    }
+    const patient = this.patient(who)
+    if (this.todayRecord().entries.some((entry) => entry.patientId === patient.id)) {
       fail(400, "这位今天已经在单上了")
     }
     const prevDays = this.patientLastDays(true)
-    const prevDay = prevDays.get(patientId)
+    const prevDay = prevDays.get(patient.id)
     if (!prevDay) fail(404, "这位还没来过，先按病症建")
-    const last = this.state.days[prevDay].entries.find((entry) => entry.patientId === patientId)
+    const last = this.state.days[prevDay].entries.find((entry) => entry.patientId === patient.id)
     if (!last) fail(404, "找不到上次的那张单")
     const open = (last.items || []).filter((item) => !item.done)
     if (!open.length) fail(400, "昨天没有未完成的项")
@@ -135,7 +148,7 @@ export const entryMethods = {
     const ids = conditionIds.length ? conditionIds : [...last.conditionIds]
     const entry = {
       id: id(),
-      patientId,
+      patientId: patient.id,
       conditionIds: ids,
       focusConditionId: ids[ids.length - 1],
       chiefSiteId: last.chiefSiteId,

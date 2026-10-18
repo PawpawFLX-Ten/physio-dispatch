@@ -11,7 +11,7 @@ import "./today.css"
 const PULL_LIMIT = 88
 const PULL_ARM = 64
 
-export function Today({ snap, onRefresh, onSnap, onOpen }) {
+export function Today({ snap, live, onRefresh, onSnap, onOpen }) {
   const today = snap.today || []
   const patients = snap.patients || []
   const activePatients = useMemo(() => patients.filter((patient) => !patient.archived), [patients])
@@ -299,6 +299,9 @@ export function Today({ snap, onRefresh, onSnap, onOpen }) {
           </span>
         </p>
         {banner ? <p className="error">{banner}</p> : null}
+        {live === false ? (
+          <p className="today-offline" role="status">连接断了，正在重连…恢复后自动刷新</p>
+        ) : null}
         {/* 名单只有一个人时收起派工标签：没有「派给我的」「按人」，整栏都不要。 */}
         {(snap.staff?.length || 0) > 1 ? (
           <div className="today-tabs" role="tablist">
@@ -698,6 +701,10 @@ export function Today({ snap, onRefresh, onSnap, onOpen }) {
                   <p className="error">已经超过 7 天没导出，建议现在拷一份机外备份。</p>
                 ) : null}
                 <p className="muted">导出会下载完整 JSON；导入会替换本机全部数据，请先确认。</p>
+                {/* 微信内置浏览器大概率不执行 blob 下载：别让人以为备份成功了。 */}
+                {/MicroMessenger/i.test(navigator.userAgent) ? (
+                  <p className="error">微信里可能下载不了导出文件：用系统浏览器打开上面的本机地址再导出。</p>
+                ) : null}
                 <h3>我是谁</h3>
                 <div className="patient-list">
                   {snap.staff?.map((person) => (

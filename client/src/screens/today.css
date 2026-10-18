@@ -405,6 +405,14 @@
   gap: 4px;
 }
 
+/* 实时连接断了：细条提示，重连成功自动消失。 */
+.today-offline {
+  margin: 0 0 6px;
+  color: #8a3a1c;
+  font-size: 14px;
+  font-weight: 700;
+}
+
 .patient-last-summary {
   margin: 2px 12px 4px;
   color: #6b5c4c;

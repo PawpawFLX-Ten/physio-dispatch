@@ -175,7 +175,9 @@ function ListPicker({ entry, pairings, pending, notice, query, onQuery, onPickSi
           className="patient-search patient-quick-input"
           type="text"
           value={quickText}
-          autoFocus
+          // 新单还没定主诉时才自动弹键盘（说一句是主路）；已定主诉的加项走搭配芯片更快，
+          // 键盘别把它们挡住，要说一句点一下输入框就行。
+          autoFocus={needSite}
           placeholder="说一句：左膝 股四头按摩8分钟 然后腘绳肌松解"
           aria-label="说一句加项"
           enterKeyHint="done"
@@ -677,6 +679,21 @@ export function PatientDay({ entryId, initial, pulse, onBack }) {
   const [manageOpen, setManageOpen] = useState(false)
   const [moreOpen, setMoreOpen] = useState(false)
   const [bodyGroup, setBodyGroup] = useState(null)
+  // 人体收起是本机偏好：开完单只看清单的人不用每次都等模型。
+  const [modelTucked, setModelTucked] = useState(() => {
+    try {
+      return localStorage.getItem("physio-model-tucked") === "1"
+    } catch {
+      return false
+    }
+  })
+  useEffect(() => {
+    try {
+      localStorage.setItem("physio-model-tucked", modelTucked ? "1" : "0")
+    } catch {
+      /* 隐私模式存不进去就算了，本次会话内仍然生效 */
+    }
+  }, [modelTucked])
   const pendingRef = useRef(false)
   const mountedRef = useRef(true)
   const backLock = useRef(false)
@@ -1218,6 +1235,32 @@ export function PatientDay({ entryId, initial, pulse, onBack }) {
     })
   }
 
+  // 过了零点还在治：把昨天没做完的就地接进今天，不用退出去加入病人里翻找。
+  function carryIntoToday() {
+    if (!entry && !entryId) return
+    if (backLock.current) return
+    backLock.current = true
+    return enqueue(async () => {
+      if (!mountedRef.current) return
+      pendingRef.current = true
+      setPending(true)
+      try {
+        // 返回值就是接好后的最新视图，直接带回今日单。
+        const carried = await api.carryUnfinished(entry?.patientId, entryId)
+        if (!mountedRef.current) return
+        onBack(carried)
+      } catch (err) {
+        if (!mountedRef.current) return
+        if (isPastMidnightError(err)) return
+        setNotice({ text: err?.message || "未能接进今天", tone: "error" })
+      } finally {
+        pendingRef.current = false
+        backLock.current = false
+        if (mountedRef.current) setPending(false)
+      }
+    })
+  }
+
   // 过了零点：无论有没有加载出 entry，都给退回今日单的出路，不再 leave。
   if (!entry || pastMidnight) {
     return (
@@ -1230,6 +1273,12 @@ export function PatientDay({ entryId, initial, pulse, onBack }) {
         <p className={notice.text ? "patient-notice is-error" : "patient-status"}>
           {pastMidnight ? pastMidnightNotice.text : notice.text || "正在打开…"}
         </p>
+        {pastMidnight ? (
+          <button type="button" className="primary patient-carry" disabled={pending} onClick={carryIntoToday}>
+            把这张单没做完的接到今天
+          </button>
+        ) : null}
+        {notice.text && pastMidnight ? <p className="patient-notice is-error">{notice.text}</p> : null}
       </main>
     )
   }
@@ -1298,14 +1347,29 @@ export function PatientDay({ entryId, initial, pulse, onBack }) {
         ) : null}
       </header>
 
-      <div className="patient-stage">
-        <BodyStage
-          chiefSiteId={entry.chiefSiteId}
-          chiefSide={entry.chiefSide}
-          items={entry.items || []}
-          reselecting={reselecting}
-          onSelect={stableSelect}
-        />
+      <div className={modelTucked ? "patient-stage is-tucked" : "patient-stage"}>
+        {modelTucked ? (
+          <div className="patient-stage-tucked">
+            <span>{entry.chiefSiteId ? `要治 ${targetTitle(entry.chiefSiteId, entry.chiefSide)}` : "人体已收起"}</span>
+            {/* 收起/展开是纯本地状态，不等保存：开单慢时也要能马上把清单放大。 */}
+            <button type="button" className="secondary" onClick={() => setModelTucked(false)}>
+              展开人体
+            </button>
+          </div>
+        ) : (
+          <>
+            <button type="button" className="patient-stage-tuck" onClick={() => setModelTucked(true)}>
+              收起人体
+            </button>
+            <BodyStage
+              chiefSiteId={entry.chiefSiteId}
+              chiefSide={entry.chiefSide}
+              items={entry.items || []}
+              reselecting={reselecting}
+              onSelect={stableSelect}
+            />
+          </>
+        )}
       </div>
 
       <div className="patient-lower">

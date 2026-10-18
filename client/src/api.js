@@ -82,8 +82,11 @@ export const api = {
     request(`/api/entries/${entryId}/quick-add`, { method: "POST", body: parsed }),
   repeatLastDay: (patientId) =>
     request("/api/today/entries/repeat-last", { method: "POST", body: { patientId } }),
-  carryUnfinished: (patientId) =>
-    request("/api/today/entries/carry-unfinished", { method: "POST", body: { patientId } }),
+  carryUnfinished: (patientId, entryId) =>
+    request("/api/today/entries/carry-unfinished", {
+      method: "POST",
+      body: { ...(patientId ? { patientId } : {}), ...(entryId ? { entryId } : {}) },
+    }),
   setPatientNote: (patientId, note) =>
     request(`/api/patients/${patientId}/note`, { method: "POST", body: { note } }),
   renamePatient: (patientId, name) =>

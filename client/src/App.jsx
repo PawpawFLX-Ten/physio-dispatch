@@ -15,6 +15,8 @@ export default function App() {
   const [entryInitial, setEntryInitial] = useState(null)
   const [error, setError] = useState("")
   const [pulse, setPulse] = useState(0)
+  // 实时连接断了要让用的人知道（列表停在旧数据不是「没活派给我」）。
+  const [live, setLive] = useState(true)
 
   async function refresh() {
     const next = await api.session()
@@ -27,6 +29,14 @@ export default function App() {
   function applySnap(next) {
     if (next && next.stage === "ready") setSnap(next)
   }
+
+  // 空闲时预取病人页的懒包（three.js + 模型加载逻辑）：第一次点病人行不用现场下几百 KB。
+  useEffect(() => {
+    const idle = window.requestIdleCallback || ((fn) => window.setTimeout(fn, 1500))
+    idle(() => {
+      import("./screens/PatientDay.jsx").catch(() => {})
+    })
+  }, [])
 
   useEffect(() => {
     refresh().catch((err) => setError(err.message))
@@ -77,6 +87,15 @@ export default function App() {
       }
       clearTimeout(debounce)
       debounce = setTimeout(() => setPulse((n) => n + 1), 400)
+    }
+    source.onopen = () => {
+      setLive(true)
+      // 重连成功当收到一次推送：断线期间别人的改动补上。
+      setPulse((n) => n + 1)
+    }
+    source.onerror = () => {
+      // EventSource 自己会按 retry 重试：出错先亮提示，重连成功由 onopen 收掉。
+      setLive(false)
     }
     return () => {
       clearTimeout(debounce)
@@ -137,7 +156,7 @@ export default function App() {
       </Suspense>
     )
   }
-  return <Today snap={snap} onRefresh={refresh} onSnap={applySnap} onOpen={(id, initial) => {
+  return <Today snap={snap} live={live} onRefresh={refresh} onSnap={applySnap} onOpen={(id, initial) => {
     setEntryId(id)
     setEntryInitial(initial || null)
   }} />

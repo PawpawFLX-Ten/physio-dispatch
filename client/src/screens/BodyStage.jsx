@@ -100,6 +100,8 @@ export function BodyStage({ chiefSiteId, chiefSide, items, reselecting, onSelect
   const zoomRef = useRef(null)
   const [phase, setPhase] = useState("loading")
   const [progress, setProgress] = useState(0)
+  // 加载失败后整段初始化重来一遍的计数器（挂进大 effect 的依赖）。
+  const [attempt, setAttempt] = useState(0)
 
   propsRef.current = { chiefSiteId, chiefSide, items, onSelect }
 
@@ -621,7 +623,7 @@ export function BodyStage({ chiefSiteId, chiefSide, items, reselecting, onSelect
       mounted = false
       release()
     }
-  }, [])
+  }, [attempt])
 
   useEffect(() => {
     paintRef.current()
@@ -645,7 +647,23 @@ export function BodyStage({ chiefSiteId, chiefSide, items, reselecting, onSelect
       {phase === "loading" ? (
         <p className="body-stage-fail">{`正在加载人体 ${progress}/${BODY_FILES.length}`}</p>
       ) : null}
-      {phase === "failed" ? <p className="body-stage-fail">模型没有加载出来</p> : null}
+      {phase === "failed" ? (
+        <>
+          <p className="body-stage-fail">模型没有加载出来</p>
+          <div className="body-stage-actions">
+            <button
+              type="button"
+              onClick={() => {
+                setPhase("loading")
+                setProgress(0)
+                setAttempt((n) => n + 1)
+              }}
+            >
+              重试
+            </button>
+          </div>
+        </>
+      ) : null}
     </section>
   )
 }
