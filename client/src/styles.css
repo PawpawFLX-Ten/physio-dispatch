@@ -20,7 +20,7 @@ button { cursor: pointer; }
   position: relative;
 }
 
-.screen { min-height: 100vh; display: flex; flex-direction: column; padding: 20px 16px 108px; }
+.screen { min-height: 100vh; display: flex; flex-direction: column; padding: max(20px, env(safe-area-inset-top)) 16px 108px; }
 .screen h1 { font-size: 32px; line-height: 1.1; margin: 8px 0 12px; letter-spacing: -0.03em; }
 .muted { color: #5e584e; margin: 0 0 16px; }
 .stack { display: flex; flex-direction: column; gap: 12px; }
@@ -33,6 +33,8 @@ button { cursor: pointer; }
   padding: 0 16px;
   box-shadow: inset 0 0 0 1px #e4dccb;
 }
+/* iOS（含微信）对小于 16px 的输入框聚焦会强制放大且不还原：所有输入框至少 16px。 */
+.field input, .field textarea, .textline { font-size: 16px; }
 .primary, .secondary, .name-btn, .row-btn {
   border: 0;
   border-radius: 16px;
@@ -49,5 +51,7 @@ button { cursor: pointer; }
   background: linear-gradient(#f6f1e700, #f6f1e7 28%);
 }
 .error { color: #8d3418; min-height: 1.3em; }
+/* 首屏打不开时的重试钮：别让手机停在死屏上。 */
+.screen-retry { margin-top: 16px; width: 100%; }
 .topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .back { border: 0; background: transparent; min-height: 48px; padding: 0 4px; font-size: 17px; }

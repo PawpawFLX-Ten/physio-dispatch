@@ -11,6 +11,8 @@ const PatientDay = lazy(() =>
 export default function App() {
   const [snap, setSnap] = useState(null)
   const [entryId, setEntryId] = useState(null)
+  // 打开病人页时带着的初始数据（开单类接口的返回就是完整视图）：省掉进页后的第一次拉取。
+  const [entryInitial, setEntryInitial] = useState(null)
   const [error, setError] = useState("")
   const [pulse, setPulse] = useState(0)
 
@@ -21,9 +23,24 @@ export default function App() {
     return next
   }
 
+  // 写接口的返回都带全套最新视图：直接喂给状态，省一次「改完再拉一遍」的往返。
+  function applySnap(next) {
+    if (next && next.stage === "ready") setSnap(next)
+  }
+
   useEffect(() => {
     refresh().catch((err) => setError(err.message))
   }, [])
+
+  // 首屏打不开（开店时 Wi-Fi 还没起来是常事）：5 秒自动再试一次，别停成死屏。
+  useEffect(() => {
+    if (!error || snap) return undefined
+    const timer = setTimeout(() => {
+      setError("")
+      refresh().catch((err) => setError(err.message))
+    }, 5000)
+    return () => clearTimeout(timer)
+  }, [error, snap])
 
   // 单人治疗室不用挑身份：名单里只有一个人时自动认领，打开就是今日单。
   // 挑选界面只留给多人治疗室；第一台手机建名字的流程不受影响。
@@ -84,7 +101,21 @@ export default function App() {
   }, [])
 
   if (error && !snap) {
-    return <main className="screen"><p className="error">{error}</p></main>
+    return (
+      <main className="screen">
+        <p className="error">{error}</p>
+        <button
+          type="button"
+          className="primary screen-retry"
+          onClick={() => {
+            setError("")
+            refresh().catch((err) => setError(err.message))
+          }}
+        >
+          再试一次
+        </button>
+      </main>
+    )
   }
   if (!snap) return <main className="screen"><p>正在打开治疗室…</p></main>
   if (snap.stage !== "ready") return <Gate snap={snap} onChange={setSnap} />
@@ -93,14 +124,21 @@ export default function App() {
       <Suspense fallback={<main className="screen"><p>正在打开病人页…</p></main>}>
         <PatientDay
           entryId={entryId}
+          initial={entryInitial}
           pulse={pulse}
-          onBack={() => {
+          onBack={(result) => {
             setEntryId(null)
-            refresh().catch((err) => setError(err.message))
+            setEntryInitial(null)
+            // 返回路径上的 leave/drop 返回值就是最新视图；拿不到（如过了零点）再拉一次。
+            if (result && result.stage === "ready") setSnap(result)
+            else refresh().catch((err) => setError(err.message))
           }}
         />
       </Suspense>
     )
   }
-  return <Today snap={snap} onRefresh={refresh} onOpen={setEntryId} />
+  return <Today snap={snap} onRefresh={refresh} onSnap={applySnap} onOpen={(id, initial) => {
+    setEntryId(id)
+    setEntryInitial(initial || null)
+  }} />
 }

@@ -1277,3 +1277,117 @@ test("pairings: sanitizeState keeps the edited table on import, empty chips allo
   assert.deepEqual(view.pairings.knee, [])
   assert.deepEqual(view.pairings.lumbar, ["glute"])
 })
+
+test("solo clinic: archive items land on the only staff; inline complete sees legacy nulls", () => {
+  const store = openStore()
+  store.setup({ deviceId: "doc", staffName: "之之" })
+  // 第一天：建档并写回病症
+  const created = store.createPatient({ deviceId: "doc", name: "王阿姨", conditionName: "右膝疼痛" })
+  const firstEntry = created.entry.id
+  store.setChief({ deviceId: "doc", entryId: firstEntry, targetId: "knee" })
+  store.addItem({ deviceId: "doc", entryId: firstEntry, targetId: "hamstring" })
+  store.leave({ deviceId: "doc", entryId: firstEntry, updateCondition: true })
+  const patientId = created.entry.patientId
+  // 换一天再来：档案带出来的项自动记在唯一的人名下
+  store.state.days = {}
+  const again = store.addExisting({ deviceId: "doc", patientId })
+  const staffId = store.state.staff[0].id
+  assert.equal(again.entry.items.every((item) => item.assigneeId === staffId), true)
+  // 今日单摘要给行内完成用的「我的当前项」也在
+  let summary = store.view("doc").today[0]
+  assert.equal(summary.mineTotal, 1)
+  assert.equal(summary.mineNextName, "腘绳肌")
+  // 老数据里没派工的项（多人时期留下的 null）在单人时同样算「我的」
+  const entry = store.todayRecord().entries.find((row) => row.patientId === patientId)
+  entry.items[0].assigneeId = null
+  summary = store.view("doc").today[0]
+  assert.equal(summary.mineTotal, 1)
+  assert.equal(summary.mineNextName, "腘绳肌")
+})
+
+test("leave ask fires once per change round, not on every re-entry", () => {
+  const store = openStore()
+  setupRoom(store)
+  const created = store.createPatient({ deviceId: "doc", name: "赵阿姨", conditionName: "腰痛" })
+  const entryId = created.entry.id
+  store.setChief({ deviceId: "doc", entryId, targetId: "lumbar" })
+  store.addItem({ deviceId: "doc", entryId, targetId: "glute" })
+  // 选「更新病症」离开：档案与今天一致，之后不问
+  store.leave({ deviceId: "doc", entryId, updateCondition: true })
+  let view = store.entryView("doc", entryId)
+  assert.equal(view.entry.diverged, false)
+  assert.equal(view.entry.leaveAsk, false)
+  // 改到会写回的字段（剂量）：要问
+  const itemId = view.entry.items[0].id
+  store.patchItem({ deviceId: "doc", entryId, itemId, patch: { dose: { minutes: 12 } } })
+  view = store.entryView("doc", entryId)
+  assert.equal(view.entry.leaveAsk, true)
+  // 答了「留在今天」：反复进出不再问；完成/改派也不重新触发
+  store.leave({ deviceId: "doc", entryId, updateCondition: false })
+  view = store.entryView("doc", entryId)
+  assert.equal(view.entry.leaveAsk, false)
+  store.patchItem({ deviceId: "doc", entryId, itemId, patch: { done: true } })
+  store.patchItem({ deviceId: "doc", entryId, itemId, patch: { assigneeId: store.state.staff[1].id } })
+  view = store.entryView("doc", entryId)
+  assert.equal(view.entry.leaveAsk, false)
+  // 又改了内容：重新问
+  store.patchItem({ deviceId: "doc", entryId, itemId, patch: { technique: "release" } })
+  view = store.entryView("doc", entryId)
+  assert.equal(view.entry.leaveAsk, true)
+  // 重排和去掉/加回也会重新点亮问询
+  store.leave({ deviceId: "doc", entryId, updateCondition: false })
+  store.removeItem({ deviceId: "doc", entryId, itemId })
+  view = store.entryView("doc", entryId)
+  assert.equal(view.entry.leaveAsk, true)
+})
+
+test("technique switch keeps minutes between massage and release, resets across equipment", () => {
+  const store = openStore()
+  setupRoom(store)
+  const created = store.createPatient({ deviceId: "doc", name: "钱阿姨", conditionName: "肩痛" })
+  const entryId = created.entry.id
+  store.setChief({ deviceId: "doc", entryId, targetId: "shoulder" })
+  store.addItem({ deviceId: "doc", entryId, targetId: "supraspinatus" })
+  let view = store.entryView("doc", entryId)
+  const itemId = view.entry.items[0].id
+  store.patchItem({ deviceId: "doc", entryId, itemId, patch: { dose: { minutes: 12 } } })
+  // 按摩→松解：调好的 12 分钟保留
+  view = store.patchItem({ deviceId: "doc", entryId, itemId, patch: { technique: "release" } })
+  assert.equal(view.entry.items[0].technique, "release")
+  assert.equal(view.entry.items[0].dose.minutes, 12)
+  // 换成器械：单位变了，重置默认组次
+  view = store.patchItem({ deviceId: "doc", entryId, itemId, patch: { technique: "equipment" } })
+  assert.deepEqual(view.entry.items[0].dose, { sets: 3, reps: 10 })
+})
+
+test("failed repeat/carry/drop no longer leaves an empty today behind", () => {
+  const store = openStore()
+  setupRoom(store)
+  const created = store.createPatient({ deviceId: "doc", name: "孙阿姨", conditionName: "膝痛" })
+  const patientId = created.entry.patientId
+  // 今天已经在单上：repeat 与 carry 都应被拒
+  assert.throws(() => store.repeatLastDay({ deviceId: "doc", patientId }), /今天已经在单上/)
+  assert.throws(() => store.carryUnfinished({ deviceId: "doc", patientId }), /今天已经在单上/)
+  assert.throws(() => store.dropEntry({ deviceId: "doc", entryId: "nope" }), /今天没有这张单/)
+  // 拒绝的请求不许在内存里留下空天（会被下一次别人的保存顺带落盘）
+  assert.equal(Object.keys(store.state.days).length, 1)
+})
+
+test("sanitizeState keeps divergedAcked through export/import", () => {
+  const store = openStore()
+  setupRoom(store)
+  const created = store.createPatient({ deviceId: "doc", name: "周阿姨", conditionName: "颈痛" })
+  const entryId = created.entry.id
+  store.setChief({ deviceId: "doc", entryId, targetId: "neck" })
+  store.addItem({ deviceId: "doc", entryId, targetId: "trapezius" })
+  store.leave({ deviceId: "doc", entryId, updateCondition: true })
+  const itemId = store.entryView("doc", entryId).entry.items[0].id
+  store.patchItem({ deviceId: "doc", entryId, itemId, patch: { dose: { minutes: 15 } } })
+  store.leave({ deviceId: "doc", entryId, updateCondition: false })
+  const data = store.exportData("doc")
+  const imported = store.importData({ deviceId: "aide", data })
+  const entry = imported.today[0]
+  assert.equal(entry.version >= 0, true)
+  const raw = store.todayRecord().entries[0]
+  assert.equal(raw.divergedAcked, true)
+})

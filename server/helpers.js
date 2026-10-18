@@ -129,6 +129,8 @@ function sanitizeDayEntry(entry, staffIds) {
     focusConditionId: typeof entry.focusConditionId === "string" ? entry.focusConditionId : null,
     chiefSiteId: typeof entry.chiefSiteId === "string" ? entry.chiefSiteId : null,
     chiefSide: normalizeSide(entry.chiefSide),
+    // 导入后这轮答没答过「记回病症」跟着走，别让所有人重答一遍。
+    divergedAcked: Boolean(entry.divergedAcked),
     version: entryVersion(entry),
     items: (Array.isArray(entry.items) ? entry.items : [])
       .filter((item) => item && typeof item === "object" && typeof item.targetId === "string" && item.targetId)

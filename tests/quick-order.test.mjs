@@ -91,3 +91,62 @@ test("forearm groups parse", () => {
   assert.equal(parsed.items[0].targetId, "forearm-extensors")
   assert.equal(parsed.items[0].technique, "equipment")
 })
+
+test("ASR homophone typos resolve to the right muscles", () => {
+  assert.equal(parseQuickOrder("骨四头按摩8分钟").items[0].targetId, "quad")
+  assert.equal(parseQuickOrder("国绳肌松解").items[0].targetId, "hamstring")
+  assert.equal(parseQuickOrder("协方肌放松").items[0].targetId, "trapezius")
+  assert.equal(parseQuickOrder("肥肠肌按摩").items[0].targetId, "gastroc")
+  // 「肩甲提肌」现状曾别「肩」截断误判成主诉：长匹配必须压过短字。
+  const levator = parseQuickOrder("肩甲提肌松解")
+  assert.equal(levator.chief, null)
+  assert.equal(levator.items[0].targetId, "levator-scap")
+  assert.equal(levator.unknown.length, 0)
+})
+
+test("colloquial duration words parse instead of silently defaulting", () => {
+  assert.equal(parseQuickOrder("腘绳肌半小时").items[0].dose.minutes, 30)
+  assert.equal(parseQuickOrder("腘绳肌一个半小时").items[0].dose.minutes, 90)
+  assert.equal(parseQuickOrder("冈上肌一个小时").items[0].dose.minutes, 60)
+  assert.equal(parseQuickOrder("冈上肌两个钟头").items[0].dose.minutes, 120)
+  assert.equal(parseQuickOrder("比目鱼肌一刻钟").items[0].dose.minutes, 15)
+  assert.equal(parseQuickOrder("比目鱼肌三刻钟").items[0].dose.minutes, 45)
+  assert.equal(parseQuickOrder("腘绳肌半小时").unknown.length, 0)
+})
+
+test("colloquial technique phrases parse", () => {
+  assert.equal(parseQuickOrder("股四头按一按").items[0].technique, "massage")
+  assert.equal(parseQuickOrder("小腿肚压一压").items[0].technique, "massage")
+  assert.equal(parseQuickOrder("腘绳肌松一下").items[0].technique, "release")
+  assert.equal(parseQuickOrder("腘绳肌松一松").items[0].technique, "release")
+  assert.equal(parseQuickOrder("臀松松").items[0].technique, "release")
+  assert.equal(parseQuickOrder("腘绳肌松一下").unknown.length, 0)
+})
+
+test("connective words do not pollute unknown list", () => {
+  const parsed = parseQuickOrder("冈上肌还有冈下肌，以及斜方肌顺便松一下")
+  assert.equal(parsed.items.length, 3)
+  assert.equal(parsed.unknown.length, 0)
+})
+
+test("spoken location phrases map to itband and rhomboid", () => {
+  assert.equal(parseQuickOrder("左膝 大腿外侧松解8分钟").items[0].targetId, "itband")
+  const seam = parseQuickOrder("肩胛骨缝按一按")
+  assert.equal(seam.chief, null)
+  assert.equal(seam.items[0].targetId, "rhomboid")
+})
+
+test("stuttered duplicate target collapses into one item", () => {
+  assert.equal(parseQuickOrder("股四头股四头按摩").items.length, 1)
+  // 隔着标点的重复不折叠：用户可能真要两项。
+  assert.equal(parseQuickOrder("冈上肌，再来一个冈上肌").items.length, 2)
+})
+
+test("both-sided chief is not carried as side=both", () => {
+  // 「双侧」只管紧跟着的那个目标（既有语义）：主诉吃掉后，后面的项不带侧。
+  const parsed = parseQuickOrder("双膝 股四头按摩8分钟")
+  assert.deepEqual(parsed.chief, { targetId: "knee", side: null })
+  assert.equal(parsed.items[0].side, null)
+  const both = parseQuickOrder("双侧股四头按摩8分钟")
+  assert.deepEqual(both.items.map((item) => item.side), ["left", "right"])
+})

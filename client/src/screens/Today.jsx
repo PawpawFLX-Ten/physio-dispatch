@@ -11,7 +11,7 @@ import "./today.css"
 const PULL_LIMIT = 88
 const PULL_ARM = 64
 
-export function Today({ snap, onRefresh, onOpen }) {
+export function Today({ snap, onRefresh, onSnap, onOpen }) {
   const today = snap.today || []
   const patients = snap.patients || []
   const activePatients = useMemo(() => patients.filter((patient) => !patient.archived), [patients])
@@ -101,7 +101,7 @@ export function Today({ snap, onRefresh, onOpen }) {
       setActiveId(patient.id)
       run(async () => {
         const result = await api.addExisting(patient.id, [extra[0].id])
-        onOpen(result.entry.id)
+        onOpen(result.entry.id, result)
       })
       return
     }
@@ -130,6 +130,17 @@ export function Today({ snap, onRefresh, onOpen }) {
   const sameName = name.trim() ? patients.find((patient) => patient.name === name.trim()) : null
   const shownToday = mineOnly ? today.filter((entry) => (entry.mineTotal || 0) > 0) : today
   const byStaff = snap.todayByStaff || []
+  // 病人多时今日单也能搜（和加入病人一个习惯：汉字/拼音首字母都行），人少时不占地方。
+  const [todayQuery, setTodayQuery] = useState("")
+  const filteredToday = useMemo(() => {
+    const q = todayQuery.trim()
+    if (!q) return shownToday
+    return shownToday.filter(
+      (entry) =>
+        matchesInitials(q, entry.patientName) ||
+        (entry.conditionNames || []).some((conditionName) => matchesInitials(q, conditionName)),
+    )
+  }, [shownToday, todayQuery])
 
   function downloadExport(data) {
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" })
@@ -168,8 +179,14 @@ export function Today({ snap, onRefresh, onOpen }) {
     })
   }
 
-  // 有新活派给自己就震一下（第一次加载不震）。
+  // 有新活派给自己就震一下（第一次加载不震）。单人治疗室所有项都算自己的，
+  // 自己刚加的项不该震，只有多人才提醒。
+  const multi = (snap.staff?.length || 0) > 1
   useEffect(() => {
+    if (!multi) {
+      prevMineCount.current = null
+      return
+    }
     const mineCount = today.reduce(
       (sum, entry) => sum + (entry.mineTotal || 0) - (entry.mineDone || 0),
       0,
@@ -178,7 +195,7 @@ export function Today({ snap, onRefresh, onOpen }) {
       navigator.vibrate?.(60)
     }
     prevMineCount.current = mineCount
-  }, [today])
+  }, [today, multi])
 
   function joinSelected(patient) {
     const allowed = extraConditions(patient).map((condition) => condition.id)
@@ -189,7 +206,7 @@ export function Today({ snap, onRefresh, onOpen }) {
     }
     run(async () => {
       const result = await api.addExisting(patient.id, ids)
-      onOpen(result.entry.id)
+      onOpen(result.entry.id, result)
     })
   }
 
@@ -197,7 +214,7 @@ export function Today({ snap, onRefresh, onOpen }) {
     run(async () => {
       const result = await api.repeatLastDay(patient.id)
       setOpen(false)
-      onOpen(result.entry.id)
+      onOpen(result.entry.id, result)
     })
   }
 
@@ -205,23 +222,25 @@ export function Today({ snap, onRefresh, onOpen }) {
     run(async () => {
       const result = await api.carryUnfinished(patient.id)
       setOpen(false)
-      onOpen(result.entry.id)
+      onOpen(result.entry.id, result)
     })
   }
 
+  // 行内完成：只锁正在做的那一行（别的行照常点），返回值就是最新视图，不再重拉一遍。
+  const [busyEntryId, setBusyEntryId] = useState(null)
   function completeMine(entry) {
-    if (!entry.mineNextId) return
-    const label = entry.mineNextName || "当前项"
-    if (!window.confirm(`完成「${entry.patientName}」的${label}？未上云不算完成。`)) return
-    run(async () => {
-      try {
-        await api.patchItem(entry.id, entry.mineNextId, { done: true }, entry.version)
-      } catch (err) {
-        await onRefresh()
-        throw err
-      }
-      await onRefresh()
-    })
+    if (!entry.mineNextId || busyEntryId) return
+    setBusyEntryId(entry.id)
+    setError("")
+    Promise.resolve(api.patchItem(entry.id, entry.mineNextId, { done: true }, entry.version))
+      .then((next) => {
+        onSnap(next)
+      })
+      .catch(async (err) => {
+        await onRefresh().catch(() => {})
+        setError(err instanceof Error ? err.message : "未能保存")
+      })
+      .finally(() => setBusyEntryId(null))
   }
 
   const exportAgeDays = (() => {
@@ -353,12 +372,28 @@ export function Today({ snap, onRefresh, onOpen }) {
                 </section>
               ))
             )
-          ) : shownToday.length === 0 ? (
-            <p className="today-empty">{mineOnly ? "还没有派给你的项" : "今天还没有病人"}</p>
+          ) : filteredToday.length === 0 ? (
+            <p className="today-empty">
+              {todayQuery.trim() ? "没搜到这位病人" : mineOnly ? "还没有派给你的项" : "今天还没有病人"}
+            </p>
           ) : (
             <div className="today-list">
-              {shownToday.map((entry) => (
-                <div key={entry.id} className={mineOnly && entry.mineNextId ? "today-row-wrap" : undefined}>
+              {!staffView && today.length >= 8 ? (
+                <input
+                  className="today-search today-filter"
+                  type="search"
+                  value={todayQuery}
+                  placeholder="搜今天的病人，可输拼音首字母"
+                  aria-label="搜今天的病人"
+                  onChange={(event) => setTodayQuery(event.target.value)}
+                />
+              ) : null}
+              {filteredToday.map((entry) => {
+                // 单人治疗室没有「派给我的」标签：行内完成直接开在名单行上。
+                const inline = mineOnly || !multi
+                const showComplete = inline && entry.mineNextId
+                return (
+                <div key={entry.id} className={showComplete ? "today-row-wrap" : undefined}>
                   <button
                     type="button"
                     className="row-btn today-row"
@@ -369,25 +404,26 @@ export function Today({ snap, onRefresh, onOpen }) {
                     {entry.conditionNames?.length ? (
                       <span className="today-conditions">{entry.conditionNames.join("、")}</span>
                     ) : null}
-                    {mineOnly && entry.mineNextName ? (
+                    {showComplete && entry.mineNextName ? (
                       <span className="today-conditions">{`当前：${entry.mineNextName}`}</span>
                     ) : null}
                     <span className="today-count">
-                      {mineOnly ? `${entry.mineDone}/${entry.mineTotal}` : `${entry.doneCount}/${entry.total}`}
+                      {inline ? `${entry.mineDone}/${entry.mineTotal}` : `${entry.doneCount}/${entry.total}`}
                     </span>
                   </button>
-                  {mineOnly && entry.mineNextId ? (
+                  {showComplete ? (
                     <button
                       type="button"
                       className="today-complete"
-                      disabled={pending}
+                      disabled={busyEntryId === entry.id}
                       onClick={() => completeMine(entry)}
                     >
                       完成
                     </button>
                   ) : null}
                 </div>
-              ))}
+                )
+              })}
             </div>
           )}
         </div>
@@ -417,105 +453,7 @@ export function Today({ snap, onRefresh, onOpen }) {
             <h2 id="join-title">加入病人</h2>
             <p className="muted">点外面关闭</p>
             <p className="error sheet-error">{error}</p>
-            {templates.length ? (
-              <>
-                <h3>从模板开始</h3>
-                <div className="patient-list">
-                  {templates.map((template) =>
-                    templatePick === template.id ? (
-                      <form
-                        key={template.id}
-                        className="today-template-form"
-                        onSubmit={(event) => {
-                          event.preventDefault()
-                          run(async () => {
-                            const result = await api.createPatientFromTemplate(templateName.trim(), template.id)
-                            setTemplatePick(null)
-                            setTemplateName("")
-                            onOpen(result.entry.id)
-                          })
-                        }}
-                      >
-                        <p className="muted">{`「${template.name}」共 ${template.itemCount} 项，写下病人姓名就能开始`}</p>
-                        <label className="field">
-                          病人姓名
-                          <input
-                            value={templateName}
-                            autoComplete="off"
-                            enterKeyHint="done"
-                            autoFocus
-                            onChange={(event) => setTemplateName(event.target.value)}
-                          />
-                        </label>
-                        <div className="today-template-buttons">
-                          <button type="button" className="secondary" onClick={() => setTemplatePick(null)}>
-                            取消
-                          </button>
-                          <button className="primary" type="submit">开始</button>
-                        </div>
-                      </form>
-                    ) : (
-                      <button
-                        key={template.id}
-                        type="button"
-                        className="row-btn patient-row"
-                        onClick={() => {
-                          setTemplatePick(template.id)
-                          setTemplateName("")
-                        }}
-                      >
-                        <span className="patient-name">{template.name}</span>
-                        <span className="patient-conds">{`模板 · ${template.itemCount} 项`}</span>
-                      </button>
-                    ),
-                  )}
-                </div>
-              </>
-            ) : null}
-            <form
-              className="stack"
-              noValidate
-              onSubmit={(event) => {
-                event.preventDefault()
-                run(async () => {
-                  const result = await api.createPatient(name, conditionName)
-                  onOpen(result.entry.id)
-                })
-              }}
-            >
-              <h3>新病人</h3>
-              <label className="field">
-                姓名
-                <input
-                  value={name}
-                  autoComplete="off"
-                  enterKeyHint="next"
-                  onChange={(event) => setName(event.target.value)}
-                />
-              </label>
-              {sameName ? (
-                <div className="today-same-name">
-                  <p className="error">{`已有叫${sameName.name}的病人`}</p>
-                  <button
-                    type="button"
-                    className="secondary"
-                    onClick={() => choosePatient(sameName)}
-                  >
-                    打开 {sameName.name}
-                  </button>
-                </div>
-              ) : null}
-              <label className="field">
-                病症名称
-                <input
-                  value={conditionName}
-                  autoComplete="off"
-                  enterKeyHint="done"
-                  onChange={(event) => setConditionName(event.target.value)}
-                />
-              </label>
-              <button className="primary" type="submit">开始点选</button>
-            </form>
+            {/* 老病人是最常见的进法：搜索放在最上面、自动聚焦，打开就能打字。 */}
             <section className="sheet-existing">
               <h3>已有病人</h3>
               {activePatients.length ? (
@@ -525,9 +463,12 @@ export function Today({ snap, onRefresh, onOpen }) {
                   value={query}
                   placeholder="搜名字或病症，可输拼音首字母"
                   aria-label="搜病人"
+                  autoFocus
                   onChange={(event) => setQuery(event.target.value)}
                 />
-              ) : null}
+              ) : (
+                <p className="muted">还没有病人档案，从下面的新病人开始。</p>
+              )}
               <div className="patient-list">
                 {shownPatients.map((patient) => {
                   const conditions = patient.conditions || []
@@ -590,6 +531,106 @@ export function Today({ snap, onRefresh, onOpen }) {
                 })}
               </div>
             </section>
+            <form
+              className="stack"
+              noValidate
+              onSubmit={(event) => {
+                event.preventDefault()
+                run(async () => {
+                  const result = await api.createPatient(name, conditionName)
+                  onOpen(result.entry.id, result)
+                })
+              }}
+            >
+              <h3>新病人</h3>
+              <label className="field">
+                姓名
+                <input
+                  value={name}
+                  autoComplete="off"
+                  enterKeyHint="next"
+                  autoFocus={!activePatients.length}
+                  onChange={(event) => setName(event.target.value)}
+                />
+              </label>
+              {sameName ? (
+                <div className="today-same-name">
+                  <p className="error">{`已有叫${sameName.name}的病人`}</p>
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() => choosePatient(sameName)}
+                  >
+                    打开 {sameName.name}
+                  </button>
+                </div>
+              ) : null}
+              <label className="field">
+                病症名称
+                <input
+                  value={conditionName}
+                  autoComplete="off"
+                  enterKeyHint="done"
+                  onChange={(event) => setConditionName(event.target.value)}
+                />
+              </label>
+              <button className="primary" type="submit">开始点选</button>
+            </form>
+            {templates.length ? (
+              <>
+                <h3>从模板开始</h3>
+                <div className="patient-list">
+                  {templates.map((template) =>
+                    templatePick === template.id ? (
+                      <form
+                        key={template.id}
+                        className="today-template-form"
+                        onSubmit={(event) => {
+                          event.preventDefault()
+                          run(async () => {
+                            const result = await api.createPatientFromTemplate(templateName.trim(), template.id)
+                            setTemplatePick(null)
+                            setTemplateName("")
+                            onOpen(result.entry.id, result)
+                          })
+                        }}
+                      >
+                        <p className="muted">{`「${template.name}」共 ${template.itemCount} 项，写下病人姓名就能开始`}</p>
+                        <label className="field">
+                          病人姓名
+                          <input
+                            value={templateName}
+                            autoComplete="off"
+                            enterKeyHint="done"
+                            autoFocus
+                            onChange={(event) => setTemplateName(event.target.value)}
+                          />
+                        </label>
+                        <div className="today-template-buttons">
+                          <button type="button" className="secondary" onClick={() => setTemplatePick(null)}>
+                            取消
+                          </button>
+                          <button className="primary" type="submit">开始</button>
+                        </div>
+                      </form>
+                    ) : (
+                      <button
+                        key={template.id}
+                        type="button"
+                        className="row-btn patient-row"
+                        onClick={() => {
+                          setTemplatePick(template.id)
+                          setTemplateName("")
+                        }}
+                      >
+                        <span className="patient-name">{template.name}</span>
+                        <span className="patient-conds">{`模板 · ${template.itemCount} 项`}</span>
+                      </button>
+                    ),
+                  )}
+                </div>
+              </>
+            ) : null}
           </div>
         </div>,
           document.body,

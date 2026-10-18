@@ -362,10 +362,29 @@ try {
   console.log("4 另一台看到新顺序：", doctorOrder)
   console.log("5 派发和完成不写回，不更新则病症保持旧顺序：通过")
 
+  // 助手刚答过「留在今天」：同一轮改动不再反复问，返回直接回今日单。
+  await clickButton(doctor.page, "返回")
+  await waitText(doctor.page, ["今日单"])
+  // 改了新内容（说一句加一项）后，问询重新点亮，答一次之后又安静。
+  await clickButton(doctor.page, "王阿姨")
+  await waitText(doctor.page, ["比目鱼肌"])
+  await clickButton(doctor.page, "加项")
+  await run(doctor.page, `
+    const input = document.querySelector(".patient-quick-input")
+    const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set
+    set.call(input, "小腿肚按摩6分钟")
+    input.dispatchEvent(new Event("input", { bubbles: true }))
+  `)
+  await sleep(300)
+  await clickButton(doctor.page, "加 1 项")
+  await waitText(doctor.page, ["腓肠肌"])
+  await clickButton(doctor.page, "收起")
   await clickButton(doctor.page, "返回")
   await waitText(doctor.page, ["今天的改动要记回病症吗"])
   await clickButton(doctor.page, "留在今天")
   await waitText(doctor.page, ["今日单"])
+  console.log("5b 记回病症每轮只问一次，改动后重新问：通过")
+
   await clickButton(doctor.page, "加入病人")
   await fill(doctor.page, "姓名", "李叔")
   await fill(doctor.page, "病症名称", "腰紧")
@@ -384,9 +403,8 @@ try {
   await clickButton(doctor.page, "李叔")
   await clickButton(doctor.page, "复制")
   await waitText(doctor.page, ["已复制，派给谁要重新填"])
+  // 这一轮的问询在 5b 已经答过：复制不碰今天的单，返回不再问。
   await clickButton(doctor.page, "返回")
-  await waitText(doctor.page, ["留在今天"])
-  await clickButton(doctor.page, "留在今天")
   await waitText(doctor.page, ["今日单", "李叔"])
   await clickButton(doctor.page, "李叔")
   await waitText(doctor.page, ["李叔"])

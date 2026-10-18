@@ -131,7 +131,9 @@ export const viewMethods = {
     const patient = this.state.patients.find((item) => item.id === entry.patientId)
     if (!patient) return null
     const done = entry.items.filter((item) => item.done).length
-    const mine = meId ? entry.items.filter((item) => item.assigneeId === meId) : []
+    // 单人治疗室所有活都是「我的」：档案带出来还没派工的项也能行内完成。
+    const solo = this.state.staff.length === 1
+    const mine = meId ? entry.items.filter((item) => solo || item.assigneeId === meId) : []
     const mineNext = mine.find((item) => !item.done) || null
     return {
       id: entry.id,
@@ -253,6 +255,8 @@ export const viewMethods = {
         focusConditionId: entry.focusConditionId,
         history: this.visitHistory(patient.id),
         diverged: this.diverged(entry),
+        // 离开时问不问「记回病症」：改过、且这轮还没答过才问。
+        leaveAsk: this.diverged(entry) && !entry.divergedAcked,
         version: entryVersion(entry),
         items: entry.items.map((item) => this.presentItem(item)),
       },

@@ -24,5 +24,11 @@ export function initialsOf(text) {
 export function matchesInitials(query, text) {
   const q = String(query || "").trim().toLowerCase()
   if (!q) return true
-  return String(text).toLowerCase().includes(q) || initialsOf(text).includes(q)
+  if (String(text).toLowerCase().includes(q)) return true
+  const initials = initialsOf(text)
+  if (initials.includes(q)) return true
+  // 语音输入的同音错字（「国绳肌」搜「腘绳肌」）：查询也转成首字母再比一次，
+  // 没认出的词点一下去搜才搜得到，不用清掉重打拼音。
+  if (/[\u4e00-\u9fa5]/.test(q)) return initials.includes(initialsOf(q))
+  return false
 }

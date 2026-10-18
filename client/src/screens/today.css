@@ -342,7 +342,7 @@
 
 .patient-last {
   color: #8a7a68;
-  font-size: 13px;
+  font-size: 14px;
   white-space: nowrap;
 }
 
@@ -377,12 +377,14 @@
 
 .today-note {
   color: #a2241c;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 700;
   max-width: 100%;
+  /* 禁忌是安全信息：允许占两行，别为了整洁截断。 */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .today-repeat {
@@ -393,8 +395,8 @@
   background: #f7e8dd;
   color: #8a3a1c;
   border-radius: 10px;
-  min-height: 38px;
-  font-size: 14px;
+  min-height: 44px;
+  font-size: 15px;
   font-weight: 700;
 }
 

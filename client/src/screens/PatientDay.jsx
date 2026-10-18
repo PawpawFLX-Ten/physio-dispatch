@@ -162,59 +162,68 @@ function ListPicker({ entry, pairings, pending, notice, query, onQuery, onPickSi
   return (
     <Sheet title="加项" onClose={onClose}>
       <Notice notice={notice} />
-      <input
-        className="patient-search patient-quick-input"
-        type="text"
-        value={quickText}
-        autoFocus
-        placeholder="说一句：左膝 股四头按摩8分钟 然后腘绳肌松解"
-        aria-label="说一句加项"
-        enterKeyHint="done"
-        autoComplete="off"
-        onChange={(event) => setQuickText(event.target.value)}
-      />
-      {quickText.trim() ? (
-        <div className="patient-quick-preview">
-          {parsed.chief ? (
-            <p className="patient-quick-chief">{`要治 ${targetTitle(parsed.chief.targetId, parsed.chief.side)}`}</p>
-          ) : null}
-          {parsed.items.length ? (
-            <ol className="patient-quick-items">
-              {parsed.items.map((item, index) => (
-                <li key={index}>
-                  {`${targetTitle(item.targetId, item.side)} · ${techniqueLabel(item.technique)} · ${doseLabel(item.technique, item.dose)}`}
-                </li>
-              ))}
-            </ol>
-          ) : null}
-          {parsed.unknown.length ? (
-            <p className="patient-quick-unknown">
-              {"没认出来（点一下去搜）："}
-              {parsed.unknown.map((word) => (
-                <button
-                  key={word}
-                  type="button"
-                  className="patient-quick-word"
-                  onClick={() => {
-                    onQuery(word)
-                    sheetSearchRef.current?.focus()
-                  }}
-                >
-                  {word}
-                </button>
-              ))}
-            </p>
-          ) : null}
-          <button
-            type="button"
-            className="primary"
-            disabled={pending || !hasSomething}
-            onClick={() => onQuickAdd(parsed, () => setQuickText(""))}
-          >
-            {parsed.items.length ? `加 ${parsed.items.length} 项` : "只记要治的地方"}
-          </button>
-        </div>
-      ) : null}
+      {/* 包成表单：键盘上的完成/回车直接入库，语音说完不用再腾手点按钮。 */}
+      <form
+        className="patient-quick"
+        onSubmit={(event) => {
+          event.preventDefault()
+          if (pending || !hasSomething) return
+          onQuickAdd(parsed, () => setQuickText(""))
+        }}
+      >
+        <input
+          className="patient-search patient-quick-input"
+          type="text"
+          value={quickText}
+          autoFocus
+          placeholder="说一句：左膝 股四头按摩8分钟 然后腘绳肌松解"
+          aria-label="说一句加项"
+          enterKeyHint="done"
+          autoComplete="off"
+          onChange={(event) => setQuickText(event.target.value)}
+        />
+        {quickText.trim() ? (
+          <div className="patient-quick-preview">
+            {parsed.chief ? (
+              <p className="patient-quick-chief">{`要治 ${targetTitle(parsed.chief.targetId, parsed.chief.side)}`}</p>
+            ) : null}
+            {parsed.items.length ? (
+              <ol className="patient-quick-items">
+                {parsed.items.map((item, index) => (
+                  <li key={index}>
+                    {`${targetTitle(item.targetId, item.side)} · ${techniqueLabel(item.technique)} · ${doseLabel(item.technique, item.dose)}`}
+                  </li>
+                ))}
+              </ol>
+            ) : null}
+            {parsed.unknown.length ? (
+              <p className="patient-quick-unknown">
+                {"没认出来（点一下去搜）："}
+                {parsed.unknown.map((word) => (
+                  <button
+                    key={word}
+                    type="button"
+                    className="patient-quick-word"
+                    onClick={() => {
+                      onQuery(word)
+                      sheetSearchRef.current?.focus()
+                    }}
+                  >
+                    {word}
+                  </button>
+                ))}
+              </p>
+            ) : null}
+            <button
+              type="submit"
+              className="primary"
+              disabled={pending || !hasSomething}
+            >
+              {parsed.items.length ? `加 ${parsed.items.length} 项` : "只记要治的地方"}
+            </button>
+          </div>
+        ) : null}
+      </form>
       {pairingIds.length && !needSite ? (
         <div className="patient-pairing-block">
           <p className="patient-label">常见搭配</p>
@@ -556,23 +565,82 @@ function PlanList({ items, currentIndex, solo, onToggle, onAssign, onOpen, onRem
   )
 }
 
-function DoseControl({ label, value, minusLabel, plusLabel, pending, onStep }) {
+// 剂量步进：点一下 ±1；按住不放连续走，本地先累加，松手才存一次（省网络也省步骤）。
+function DoseControl({ label, value, minusLabel, plusLabel, pending, onCommit }) {
+  const min = 1
+  const [delta, setDelta] = useState(0)
+  const deltaRef = useRef(0)
+  const holdTimer = useRef(null)
+  const repeatTimer = useRef(null)
+  const pointerDriven = useRef(false)
+  const commitRef = useRef(onCommit)
+  commitRef.current = onCommit
+
+  const shown = Math.max(min, value + delta)
+
+  function step(dir) {
+    if (Math.max(min, value + deltaRef.current + dir) === Math.max(min, value + deltaRef.current)) return
+    deltaRef.current += dir
+    setDelta(deltaRef.current)
+  }
+
+  function stop(commit = true) {
+    if (holdTimer.current) clearTimeout(holdTimer.current)
+    if (repeatTimer.current) clearInterval(repeatTimer.current)
+    holdTimer.current = null
+    repeatTimer.current = null
+    const total = deltaRef.current
+    deltaRef.current = 0
+    setDelta(0)
+    if (commit && total) commitRef.current(total)
+  }
+
+  function press(dir) {
+    if (pending && deltaRef.current === 0) return
+    step(dir)
+    holdTimer.current = setTimeout(() => {
+      repeatTimer.current = setInterval(() => step(dir), 110)
+    }, 380)
+  }
+
+  // 卸载时按住还没松开：丢掉没提交的累加，不偷偷存。
+  useEffect(() => () => stop(false), [])
+
+  const holdProps = (dir) => ({
+    onPointerDown: () => {
+      pointerDriven.current = true
+      press(dir)
+    },
+    onPointerUp: () => stop(),
+    onPointerLeave: () => stop(),
+    onPointerCancel: () => stop(),
+    // 键盘（回车/空格触发 click）：算一次点按。
+    onClick: () => {
+      if (pointerDriven.current) {
+        pointerDriven.current = false
+        return
+      }
+      press(dir)
+      stop()
+    },
+  })
+
   return (
     <div className="patient-stepper">
-      <button type="button" aria-label={minusLabel} disabled={pending || value <= 1} onClick={() => onStep(-1)}>
+      <button type="button" aria-label={minusLabel} disabled={pending && !delta} {...holdProps(-1)}>
         −
       </button>
       <span>
-        {value} {label}
+        {shown} {label}
       </span>
-      <button type="button" aria-label={plusLabel} disabled={pending} onClick={() => onStep(1)}>
+      <button type="button" aria-label={plusLabel} disabled={pending && !delta} {...holdProps(1)}>
         +
       </button>
     </div>
   )
 }
 
-export function PatientDay({ entryId, pulse, onBack }) {
+export function PatientDay({ entryId, initial, pulse, onBack }) {
   const [entry, setEntry] = useState(null)
   const [staff, setStaff] = useState([])
   const [patients, setPatients] = useState([])
@@ -687,6 +755,11 @@ export function PatientDay({ entryId, pulse, onBack }) {
     setPastMidnight(false)
     setRenameOpen(false)
     setManageOpen(false)
+    // 开单类接口的返回就是这张单的最新视图：带着进来就不再拉第一次。
+    if (initial?.entry && initial.entry.id === entryId) {
+      applyResult(initial)
+      return undefined
+    }
     api
       .entry(entryId)
       .then((result) => {
@@ -705,7 +778,7 @@ export function PatientDay({ entryId, pulse, onBack }) {
     return () => {
       gone = true
     }
-  }, [entryId, applyResult])
+  }, [entryId, initial, applyResult])
 
   // 别的手机改了这张单：拉一次最新的。自己改动排队中则先记过期，队空后再补拉。
   useEffect(() => {
@@ -726,10 +799,10 @@ export function PatientDay({ entryId, pulse, onBack }) {
       })
   }, [pulse])
 
-  // 撤销条只停 5 秒，过了就沉下去。
+  // 撤销条停 10 秒，过了就沉下去：滑错手后有足够时间反应，又不会一直挂着。
   useEffect(() => {
     if (!undo) return undefined
-    const timer = setTimeout(() => setUndo(null), 5000)
+    const timer = setTimeout(() => setUndo(null), 10_000)
     return () => clearTimeout(timer)
   }, [undo])
 
@@ -831,7 +904,8 @@ export function PatientDay({ entryId, pulse, onBack }) {
         const latest = await api.entry(entryId)
         if (!mountedRef.current) return
         applyResult(latest)
-        if (latest.entry?.diverged) {
+        // 只在改过且这轮还没答过时问；答过「留在今天」后反复进出不再打扰。
+        if (latest.entry?.leaveAsk) {
           setAssignOpen(false)
           setItemAssignId(null)
           setCopyOpen(false)
@@ -849,9 +923,10 @@ export function PatientDay({ entryId, pulse, onBack }) {
           setLeaveAsk(true)
           return
         }
-        await api.leave(entryId, false)
+        // leave 的返回值就是最新视图：直接带回今日单，省一次重拉。
+        const left = await api.leave(entryId, false)
         if (!mountedRef.current) return
-        onBack()
+        onBack(left)
       } catch (err) {
         if (!mountedRef.current) return
         // 过了零点别再 leave：提示后返回键直接回今日单。
@@ -880,9 +955,9 @@ export function PatientDay({ entryId, pulse, onBack }) {
       pendingRef.current = true
       setPending(true)
       try {
-        await api.leave(entryId, updateCondition)
+        const left = await api.leave(entryId, updateCondition)
         if (!mountedRef.current) return
-        onBack()
+        onBack(left)
       } catch (err) {
         if (!mountedRef.current) return
         if (isPastMidnightError(err)) {
@@ -1123,9 +1198,10 @@ export function PatientDay({ entryId, pulse, onBack }) {
       setPending(true)
       try {
         await api.leave(entryId, false)
-        await api.dropEntry(entryId)
+        // dropEntry 的返回是去掉这张单之后的今日单视图，同样直接带回。
+        const dropped = await api.dropEntry(entryId)
         if (!mountedRef.current) return
-        onBack()
+        onBack(dropped)
       } catch (err) {
         if (!mountedRef.current) return
         if (isPastMidnightError(err)) {
@@ -1635,9 +1711,15 @@ export function PatientDay({ entryId, pulse, onBack }) {
                 disabled={pending}
                 onClick={() => {
                   if (activeItem.technique === technique.id) return
+                  // 换进/换出器械时剂量会重置成默认组次：明说，别让 12 分钟悄悄变 3组×10次。
+                  const crossesEquipment =
+                    activeItem.technique === "equipment" || technique.id === "equipment"
                   mutate(
                     () => withVersion((v) => api.patchItem(entryId, activeItem.id, { technique: technique.id }, v)),
-                    { fail: "未能保存" },
+                    {
+                      fail: "未能保存",
+                      ...(crossesEquipment ? { success: "剂量已按新手法重置，看一眼再走" } : {}),
+                    },
                   )
                 }}
               >
@@ -1666,6 +1748,31 @@ export function PatientDay({ entryId, pulse, onBack }) {
               </button>
             ))}
           </div>
+          {hasSides(targetById(activeItem.targetId)) ? (
+            <>
+              <p className="patient-label">侧别</p>
+              <div className="patient-directions">
+                {["left", "right"].map((side) => (
+                  <button
+                    type="button"
+                    key={side}
+                    className={activeItem.side === side ? "patient-choice is-on" : "patient-choice"}
+                    aria-pressed={activeItem.side === side}
+                    disabled={pending}
+                    onClick={() => {
+                      if (activeItem.side === side) return
+                      mutate(
+                        () => withVersion((v) => api.patchItem(entryId, activeItem.id, { side }, v)),
+                        { fail: "未能保存" },
+                      )
+                    }}
+                  >
+                    {side === "left" ? "左" : "右"}
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : null}
           <p className="patient-label">剂量</p>
           <div className="patient-stack">
             {activeItem.technique === "equipment" ? (
@@ -1676,7 +1783,7 @@ export function PatientDay({ entryId, pulse, onBack }) {
                   minusLabel="减少组数"
                   plusLabel="增加组数"
                   pending={pending}
-                  onStep={(delta) => {
+                  onCommit={(delta) => {
                     const sets = numeric(activeItem.dose?.sets, 1)
                     const reps = numeric(activeItem.dose?.reps, 1)
                     const next = Math.max(1, sets + delta)
@@ -1696,7 +1803,7 @@ export function PatientDay({ entryId, pulse, onBack }) {
                   minusLabel="减少次数"
                   plusLabel="增加次数"
                   pending={pending}
-                  onStep={(delta) => {
+                  onCommit={(delta) => {
                     const sets = numeric(activeItem.dose?.sets, 1)
                     const reps = numeric(activeItem.dose?.reps, 1)
                     const next = Math.max(1, reps + delta)
@@ -1718,7 +1825,7 @@ export function PatientDay({ entryId, pulse, onBack }) {
                 minusLabel="减少分钟"
                 plusLabel="增加分钟"
                 pending={pending}
-                onStep={(delta) => {
+                onCommit={(delta) => {
                   const minutes = numeric(activeItem.dose?.minutes, 1)
                   const next = Math.max(1, minutes + delta)
                   if (next === minutes) return

@@ -8,14 +8,18 @@ const TARGET_ALIASES = [
   ["腰", "lumbar"],
   ["脖子", "neck"], ["颈椎", "neck"], ["颈", "neck"],
   ["肩", "shoulder"],
+  // 语音输入的同音错字也认（腘/腓是生僻字，键盘话筒几乎必错）。
   ["腘绳肌", "hamstring"], ["腘绳", "hamstring"], ["大腿后侧", "hamstring"], ["大腿后", "hamstring"],
+  ["国绳肌", "hamstring"], ["国绳", "hamstring"],
   ["股四头肌", "quad"], ["股四头", "quad"], ["大腿前侧", "quad"], ["大腿前", "quad"],
+  ["骨四头肌", "quad"], ["骨四头", "quad"], ["故四头", "quad"],
   ["臀", "glute"], ["屁股", "glute"],
   ["比目鱼肌", "soleus"], ["比目鱼", "soleus"],
   ["腓肠肌", "gastroc"], ["腓肠", "gastroc"], ["小腿肚", "gastroc"],
+  ["肥肠肌", "gastroc"], ["肥肠", "gastroc"],
   ["足底", "plantar"], ["脚底", "plantar"], ["脚掌", "plantar"],
   ["承山", "chengshan"],
-  ["髂胫束", "itband"],
+  ["髂胫束", "itband"], ["大腿外侧", "itband"],
   ["内收肌群", "adductors"], ["内收肌", "adductors"], ["大腿内侧", "adductors"],
   ["缝匠肌", "sartorius"], ["缝匠", "sartorius"],
   ["腘肌", "popliteus"],
@@ -26,7 +30,7 @@ const TARGET_ALIASES = [
   ["腓骨长短肌", "fibularis"], ["腓骨肌", "fibularis"],
   ["趾长伸肌", "edl"],
   ["趾长屈肌", "fdl"],
-  ["斜方肌", "trapezius"], ["斜方", "trapezius"],
+  ["斜方肌", "trapezius"], ["斜方", "trapezius"], ["协方肌", "trapezius"], ["协方", "trapezius"],
   ["竖脊肌", "erector-spinae"], ["竖脊", "erector-spinae"], ["脊柱两侧", "erector-spinae"],
   ["胸大肌", "pectoralis-major"], ["胸小肌", "pectoralis-minor"],
   ["腹外斜肌", "obliquus-externus"], ["腹斜肌", "obliquus-externus"],
@@ -35,8 +39,8 @@ const TARGET_ALIASES = [
   ["肱桡肌", "brachioradialis"],
   ["前臂伸肌群", "forearm-extensors"], ["前臂伸肌", "forearm-extensors"],
   ["前臂屈肌群", "forearm-flexors"], ["前臂屈肌", "forearm-flexors"],
-  ["肩胛提肌", "levator-scap"],
-  ["菱形肌", "rhomboid"], ["菱形", "rhomboid"],
+  ["肩胛提肌", "levator-scap"], ["肩甲提肌", "levator-scap"], ["肩钾提肌", "levator-scap"],
+  ["菱形肌", "rhomboid"], ["菱形", "rhomboid"], ["肩胛骨缝", "rhomboid"], ["肩胛缝", "rhomboid"],
   ["前锯肌", "serratus"], ["前锯", "serratus"],
   ["冈上肌", "supraspinatus"], ["冈上", "supraspinatus"],
   ["冈下肌", "infraspinatus"], ["冈下", "infraspinatus"],
@@ -81,13 +85,18 @@ export function parseQuickOrder(text) {
       from = at + alias.length
     }
   }
-  addAll(/按摩|揉捏|揉|推拿/g, "technique", () => "massage")
-  addAll(/松解|放松/g, "technique", () => "release")
+  addAll(/按摩|揉捏|揉|推拿|按一按|按按|压一压|揉揉|推一推|按压/g, "technique", () => "massage")
+  addAll(/松解|放松|松一下|松一松|松松/g, "technique", () => "release")
   addAll(/器械|训练/g, "technique", () => "equipment")
   addAll(/沿肌纤维|顺肌纤维/g, "direction", () => "along")
   addAll(/逆着肌纤维|逆肌纤维/g, "direction", () => "against")
   addAll(/由近到远|从近到远/g, "direction", () => "outward")
   addAll(/由远到近|从远到近/g, "direction", () => "inward")
+  // 口语时长：半小时/一个半小时/一个小时/一刻钟（数字+分钟的规则认不出这些）。
+  addAll(/一个半(?:小时|钟头)/g, "dose", () => ({ minutes: 90 }))
+  addAll(/半(?:小时|钟头)/g, "dose", () => ({ minutes: 30 }))
+  addAll(/([一二两三四五六七八九]|十)个?(?:小时|钟头)/g, "dose", (m) => ({ minutes: cnNum(m[1]) * 60 }))
+  addAll(/([一二三])刻钟/g, "dose", (m) => ({ minutes: cnNum(m[1]) * 15 }))
   addAll(new RegExp(`${NUM}分钟`, "g"), "dose", (m) => ({ minutes: cnNum(m[1]) }))
   addAll(new RegExp(`${NUM}组`, "g"), "dose", (m) => ({ sets: cnNum(m[1]) }))
   addAll(new RegExp(`${NUM}次`, "g"), "dose", (m) => ({ reps: cnNum(m[1]) }))
@@ -115,6 +124,15 @@ export function parseQuickOrder(text) {
       tokens.splice(i + 1, 1)
     }
   }
+  // 语音卡顿会把同一个词连说两遍：完全相邻的同名目标只留一个（隔着标点的重复不算）。
+  for (let i = tokens.length - 2; i >= 0; i--) {
+    if (
+      tokens[i].kind === "target" && tokens[i + 1].kind === "target" &&
+      tokens[i + 1].start === tokens[i].end && tokens[i + 1].value === tokens[i].value
+    ) {
+      tokens.splice(i + 1, 1)
+    }
+  }
 
   const sticky = { technique: "massage", direction: "along", dose: { minutes: 8 } }
   let pendingSide = null
@@ -127,7 +145,8 @@ export function parseQuickOrder(text) {
       const target = targetById(token.value)
       if (!target) continue
       if (!chief && allowsChief(target)) {
-        chief = { targetId: target.id, side: hasSides(target) ? pendingSide : null }
+        // 「双侧」由两条左右分开的项表达，主诉不承载：存成不带侧，免得服务端静默丢掉。
+        chief = { targetId: target.id, side: hasSides(target) && pendingSide !== "both" ? pendingSide : null }
       } else if (target.kind !== "site") {
         const sides = pendingSide === "both" ? ["left", "right"] : [pendingSide]
         groupStart = items.length
@@ -195,7 +214,7 @@ function applyToGroup(items, groupStart, key, value, sticky) {
 }
 
 // 没被吃掉的词挑出来给用户看，方便发现说岔了的地方。连接词不算。
-const STOP_WORDS = new Set(["然后", "接着", "接下来", "再", "先", "最后", "和", "跟", "与", "每", "各", "做", "一下", "再来", "之后", "其次"])
+const STOP_WORDS = new Set(["然后", "接着", "接下来", "再", "先", "最后", "和", "跟", "与", "每", "各", "做", "一下", "再来", "之后", "其次", "还有", "以及", "加上", "顺便", "再来一次", "然后呢"])
 
 function leftoverWords(raw, tokens) {
   const mask = raw.split("")

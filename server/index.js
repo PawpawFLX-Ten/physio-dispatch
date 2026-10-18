@@ -4,6 +4,7 @@ import https from "node:https"
 import os from "node:os"
 import path from "node:path"
 import express from "express"
+import compression from "compression"
 import { fileURLToPath } from "node:url"
 import { ClinicStore, todayKey } from "./store.js"
 
@@ -17,7 +18,17 @@ const store = new ClinicStore(
 store.load()
 
 const app = express()
-app.use(express.json({ limit: "12mb" }))
+// 上限 128MB：只给导入恢复留够（每天 20 单 × 7 项约 20-35MB/年）；普通请求体都是几百字节。
+app.use(express.json({ limit: "128mb" }))
+// 明文 HTTP 下 gzip：首访的 JS/CSS 少传约七成。SSE 绝不能压（会缓冲住实时推送）。
+app.use(
+  compression({
+    filter(req, res) {
+      if (req.path === "/api/events") return false
+      return compression.filter(req, res)
+    },
+  }),
+)
 
 let currentOrigin = null
 
@@ -174,6 +185,19 @@ if (fs.existsSync(path.join(dist, "index.html"))) {
     res.sendFile(path.join(dist, "index.html"))
   })
 }
+
+// body-parser 的错误默认回一张 HTML 页，手机上只能看到笼统的「未能保存」：
+// 超限（导入的文件太大）和坏 JSON 各给一句能看懂的话。
+app.use((error, _req, res, _next) => {
+  if (error?.type === "entity.too.large") {
+    return res.status(413).json({ error: "文件太大，超出能导入的上限（128MB）" })
+  }
+  if (error?.type === "entity.parse.failed" || error?.status === 400) {
+    return res.status(400).json({ error: "发过去的数据不是有效的 JSON" })
+  }
+  console.error("[clinic]", error)
+  res.status(500).json({ error: "服务器出了点问题，稍后再试" })
+})
 
 function lanAddresses() {
   const found = []

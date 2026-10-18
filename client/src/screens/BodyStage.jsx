@@ -43,6 +43,26 @@ const FOOT = /calcaneus|talus|navicular|cuboid|cuneiform|metatarsal|toe|sesamoid
 const MIN_Z = 1.7
 const MAX_Z = 4.8
 
+// 模块级缓存：人体模型解码一次就留在内存里，进出病人页不再重付 15 个 GLB 的解码开销。
+// 每次挂载 clone 一份场景（geometry/material 是共享引用），所以绝不能 dispose 共享资源。
+const gltfCache = new Map()
+const sharedLoader = new GLTFLoader()
+const sharedDraco = new DRACOLoader()
+sharedDraco.setDecoderPath(`/draco/`)
+sharedLoader.setDRACOLoader(sharedDraco)
+
+function loadBodyFile(file) {
+  const hit = gltfCache.get(file)
+  if (hit) return hit
+  const pending = sharedLoader.loadAsync(`/body/${file}?v=${BODY_VERSION}`).catch((err) => {
+    // 失败不留在缓存里，下次挂载还能重试。
+    gltfCache.delete(file)
+    throw err
+  })
+  gltfCache.set(file, pending)
+  return pending
+}
+
 function sideOf(point, targetId) {
   if (!hasSides(targetById(targetId))) return null
   return point.x >= 0 ? "right" : "left"
@@ -166,11 +186,8 @@ export function BodyStage({ chiefSiteId, chiefSide, items, reselecting, onSelect
         roughness: 0.62,
         metalness: 0.02,
       }))
-      const previous = mesh.material
+      // 换掉的材质属于缓存共享件，不能 dispose；geos 也只收本实例新建的。
       mesh.material = material
-      if (Array.isArray(previous)) previous.forEach((item) => item.dispose())
-      else previous?.dispose()
-      if (mesh.geometry) geos.add(mesh.geometry)
       const box = new Box3().setFromObject(mesh)
       const center = box.getCenter(new Vector3())
       const side = sideOf(center, targetId)
@@ -202,50 +219,43 @@ export function BodyStage({ chiefSiteId, chiefSide, items, reselecting, onSelect
     }
 
     async function loadBody(figure) {
-      const loader = new GLTFLoader()
-      const dracoLoader = new DRACOLoader()
-      dracoLoader.setDecoderPath(`/draco/`)
-      loader.setDRACOLoader(dracoLoader)
       let loaded = 0
       const rig = new Group()
       const content = new Group()
       rig.add(content)
       const models = await Promise.all(
         BODY_FILES.map(async (file) => {
-          const gltf = await loader.loadAsync(`/body/${file}?v=${BODY_VERSION}`)
+          const gltf = await loadBodyFile(file)
           loaded += 1
           if (mounted) setProgress(loaded)
-          return { file, gltf }
+          // clone 一份再动：材质与父子关系只改这份，缓存里的原件保持原样。
+          return { file, scene: gltf.scene.clone(true) }
         }),
-      ).finally(() => dracoLoader.dispose())
+      )
       if (stopped) return
 
       const footMeshes = []
       const kept = []
-      for (const { file, gltf } of models) {
+      for (const { file, scene } of models) {
         const meshes = []
-        gltf.scene.traverse((obj) => {
+        scene.traverse((obj) => {
           if (obj.isMesh) meshes.push(obj)
         })
         for (const mesh of meshes) {
           const name = mesh.userData.name || mesh.name || ""
           const decision = resolveMesh(name, file)
           if (decision.kind === "hide") {
+            // geometry/material 与缓存共享：只摘下来，不 dispose。
             mesh.removeFromParent()
-            mesh.geometry?.dispose()
-            const previous = mesh.material
-            if (Array.isArray(previous)) previous.forEach((item) => item.dispose())
-            else previous?.dispose()
             continue
           }
           kept.push(mesh)
           mesh.userData.part = decision
-          if (mesh.geometry) geos.add(mesh.geometry)
           if (FOOT.test(meshSlug(name))) footMeshes.push(mesh)
           mesh.castShadow = false
           mesh.receiveShadow = false
         }
-        content.add(gltf.scene)
+        content.add(scene)
       }
 
       figure.add(rig)
@@ -271,10 +281,7 @@ export function BodyStage({ chiefSiteId, chiefSide, items, reselecting, onSelect
           track(mesh, decision.targetId, decision.tissue, restingColor(decision.targetId, decision.tissue))
           continue
         }
-        const previous = mesh.material
         mesh.material = decision.tissue === "muscle" ? muscleMat : boneMat
-        if (Array.isArray(previous)) previous.forEach((item) => item.dispose())
-        else previous?.dispose()
       }
 
       const sideBoxes = (meshes) => {

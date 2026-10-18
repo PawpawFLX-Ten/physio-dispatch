@@ -27,11 +27,15 @@ export function getDeviceId() {
 }
 
 // 局域网 Wi-Fi 抖动会让 fetch 挂住：不设上限的话按钮会永久灰着。
-const REQUEST_TIMEOUT_MS = 30_000
+// 普通请求 10 秒足够（超时多半是网络真断了，别让按钮灰半分钟）；
+// 导入导出要搬整间治疗室的数据，各给自己的宽限。
+const REQUEST_TIMEOUT_MS = 10_000
+const EXPORT_TIMEOUT_MS = 60_000
+const IMPORT_TIMEOUT_MS = 120_000
 
-async function request(path, { method = "GET", body } = {}) {
+async function request(path, { method = "GET", body, timeout = REQUEST_TIMEOUT_MS } = {}) {
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+  const timer = setTimeout(() => controller.abort(), timeout)
   let response
   try {
     response = await fetch(path, {
@@ -128,7 +132,7 @@ export const api = {
   // 导出走 GET 附件下载；失败时接口返回 JSON 错误。
   exportClinic: async () => {
     const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+    const timer = setTimeout(() => controller.abort(), EXPORT_TIMEOUT_MS)
     let response
     try {
       response = await fetch(withDevice("/api/data/export"), { signal: controller.signal })
@@ -145,5 +149,6 @@ export const api = {
     }
     return response.json()
   },
-  importClinic: (data) => request("/api/data/import", { method: "POST", body: { data } }),
+  importClinic: (data) =>
+    request("/api/data/import", { method: "POST", body: { data }, timeout: IMPORT_TIMEOUT_MS }),
 }

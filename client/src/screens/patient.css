@@ -23,7 +23,8 @@
 
 .patient-top {
   flex: none;
-  padding: 4px 16px 8px;
+  /* 加主屏幕（HTTPS）的刘海屏手机：状态栏不压住病人名。 */
+  padding: max(4px, env(safe-area-inset-top)) 16px 8px;
 }
 
 .patient-day .back {
@@ -585,14 +586,15 @@
 .patient-quick-word {
   display: inline-block;
   margin: 2px 3px 0 0;
-  padding: 0 10px;
-  min-height: 30px;
+  padding: 0 12px;
+  min-height: 40px;
+  line-height: 40px;
   border: 0;
   border-radius: 999px;
   background: #fffdf8;
   box-shadow: inset 0 0 0 1px #e4dccb;
   color: #5e584e;
-  font-size: 13px;
+  font-size: 15px;
 }
 
 .patient-row.is-current .patient-row-main {

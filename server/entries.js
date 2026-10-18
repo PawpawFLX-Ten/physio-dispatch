@@ -24,6 +24,11 @@ function focusOf(entry) {
     : entry.conditionIds[entry.conditionIds.length - 1]
 }
 
+// 单子改了会偏离病症存档的内容：下次离开要重新问「记回病症吗」。
+function touchDiverged(entry) {
+  entry.divergedAcked = false
+}
+
 export const entryMethods = {
   createPatient({ deviceId, name, conditionName }) {
     this.requireStaff(deviceId)
@@ -75,7 +80,8 @@ export const entryMethods = {
   repeatLastDay({ deviceId, patientId }) {
     this.requireStaff(deviceId)
     const patient = this.patient(patientId)
-    if (this.day().entries.some((entry) => entry.patientId === patientId)) {
+    // 先用只读的 todayRecord 判断：校验失败时别在内存里留下一个空的「今天」。
+    if (this.todayRecord().entries.some((entry) => entry.patientId === patientId)) {
       fail(400, "这位今天已经在单上了")
     }
     const prevDays = this.patientLastDays(true)
@@ -115,7 +121,7 @@ export const entryMethods = {
   carryUnfinished({ deviceId, patientId }) {
     this.requireStaff(deviceId)
     const patient = this.patient(patientId)
-    if (this.day().entries.some((entry) => entry.patientId === patientId)) {
+    if (this.todayRecord().entries.some((entry) => entry.patientId === patientId)) {
       fail(400, "这位今天已经在单上了")
     }
     const prevDays = this.patientLastDays(true)
@@ -164,6 +170,7 @@ export const entryMethods = {
       if (!target || !allowsChief(target)) fail(400, "这个位置不能当作要治的地方")
       entry.chiefSiteId = chief.targetId
       entry.chiefSide = normalizeSide(chief.side)
+      touchDiverged(entry)
     }
     const previous = entry.items[entry.items.length - 1]
     const focus = focusOf(entry)
@@ -194,6 +201,7 @@ export const entryMethods = {
       added += 1
     }
     if (!added && !chief?.targetId) fail(400, "没有可加的项")
+    if (added) touchDiverged(entry)
     this.save()
     this.audit(deviceId, "说一句加项", { 项数: added })
     return this.entryView(deviceId, entry.id)
@@ -256,6 +264,8 @@ export const entryMethods = {
   },
 
   makeEntry(patient, conditionIds, focusConditionId) {
+    // 单人治疗室：档案带出来的项也记在那个人名下，今日单上能直接完成当前项。
+    const soloStaffId = this.state.staff.length === 1 ? this.state.staff[0].id : null
     const items = []
     for (const conditionId of conditionIds) {
       const condition = this.condition(patient, conditionId)
@@ -269,7 +279,7 @@ export const entryMethods = {
           technique: item.technique,
           direction: item.direction,
           dose: structuredClone(item.dose),
-          assigneeId: null,
+          assigneeId: soloStaffId,
           done: false,
           completedBy: null,
         })
@@ -331,6 +341,7 @@ export const entryMethods = {
     const entry = this.entryById(entryId)
     entry.chiefSiteId = targetId
     entry.chiefSide = normalizeSide(side)
+    touchDiverged(entry)
     this.save()
     this.audit(deviceId, "改要治的位置", { 位置: targetTitle(targetId, normalizeSide(side)) })
     return this.entryView(deviceId, entry.id)
@@ -363,6 +374,7 @@ export const entryMethods = {
       done: false,
       completedBy: null,
     })
+    touchDiverged(entry)
     this.save()
     this.audit(deviceId, "点选一项", { 位置: targetTitle(targetId, normalizeSide(side)), 派给: staff.name })
     return this.entryView(deviceId, entry.id)
@@ -374,13 +386,20 @@ export const entryMethods = {
     assertExpectedVersion(entry, expectedVersion)
     const item = entry.items.find((row) => row.id === itemId)
     if (!item) fail(404, "找不到这一项")
+    // 只在改到会写回病症的字段（手法/方向/剂量/侧）时才重新问「记回病症」；
+    // 完成和改派不碰存档，答过的不用再答。
+    let touched = false
     if (patch.technique && patch.technique !== item.technique) {
       if (!TECHNIQUES.some((row) => row.id === patch.technique)) fail(400, "手法不对")
+      // 按摩↔松解都按分钟计：换手法不丢调好的时长；只有换成/换出器械才重置成默认组次。
+      const staysMinutes = item.technique !== "equipment" && patch.technique !== "equipment"
       item.technique = patch.technique
-      item.dose = defaultDose(patch.technique)
+      if (!staysMinutes) item.dose = defaultDose(patch.technique)
+      touched = true
     }
     if (patch.direction) {
       if (!DIRECTIONS.some((row) => row.id === patch.direction)) fail(400, "方向不对")
+      if (patch.direction !== item.direction) touched = true
       item.direction = patch.direction
     }
     if (patch.assigneeId) {
@@ -389,7 +408,11 @@ export const entryMethods = {
       const owner = this.patient(entry.patientId)
       owner.lastAssigneeId = patch.assigneeId
     }
-    if (Object.prototype.hasOwnProperty.call(patch, "side")) item.side = normalizeSide(patch.side)
+    if (Object.prototype.hasOwnProperty.call(patch, "side")) {
+      const side = normalizeSide(patch.side)
+      if (side !== (item.side || null)) touched = true
+      item.side = side
+    }
     if (typeof patch.done === "boolean") {
       if (patch.done) {
         if (!item.done) {
@@ -402,13 +425,16 @@ export const entryMethods = {
       }
     }
     if (patch.dose && item.technique === "equipment") {
-      item.dose = {
-        sets: Math.max(1, Number(patch.dose.sets ?? item.dose.sets) || 1),
-        reps: Math.max(1, Number(patch.dose.reps ?? item.dose.reps) || 1),
-      }
+      const sets = Math.max(1, Number(patch.dose.sets ?? item.dose.sets) || 1)
+      const reps = Math.max(1, Number(patch.dose.reps ?? item.dose.reps) || 1)
+      if (item.dose?.sets !== sets || item.dose?.reps !== reps) touched = true
+      item.dose = { sets, reps }
     } else if (patch.dose) {
-      item.dose = { minutes: Math.max(1, Number(patch.dose.minutes ?? item.dose.minutes) || 1) }
+      const minutes = Math.max(1, Number(patch.dose.minutes ?? item.dose.minutes) || 1)
+      if (item.dose?.minutes !== minutes) touched = true
+      item.dose = { minutes }
     }
+    if (touched) touchDiverged(entry)
     bumpEntryVersion(entry)
     this.save()
     this.audit(deviceId, "改一项", { 项: targetTitle(item.targetId, item.side || null), 改动: patch })
@@ -420,6 +446,7 @@ export const entryMethods = {
     const entry = this.entryById(entryId)
     const item = entry.items.find((row) => row.id === itemId)
     entry.items = entry.items.filter((item) => item.id !== itemId)
+    touchDiverged(entry)
     this.save()
     this.audit(deviceId, "去掉一项", { 项: item ? targetTitle(item.targetId, item.side || null) : itemId })
     return this.entryView(deviceId, entry.id)
@@ -457,6 +484,7 @@ export const entryMethods = {
       completedBy: typeof item.completedBy === "string" ? item.completedBy : null,
     }
     entry.items.splice(at, 0, restored)
+    touchDiverged(entry)
     this.save()
     this.audit(deviceId, "插回一项", { 项: targetTitle(restored.targetId, restored.side) })
     return this.entryView(deviceId, entry.id)
@@ -473,6 +501,7 @@ export const entryMethods = {
       fail(400, "顺序不完整")
     }
     entry.items = ids.map((itemId) => map.get(itemId))
+    touchDiverged(entry)
     bumpEntryVersion(entry)
     this.save()
     this.audit(deviceId, "调整顺序")
@@ -497,7 +526,8 @@ export const entryMethods = {
 
   dropEntry({ deviceId, entryId }) {
     this.requireStaff(deviceId)
-    const day = this.day()
+    // 只读地找：拿掉不存在的条目时别顺手创建一个空的「今天」。
+    const day = this.todayRecord()
     const entry = day.entries.find((item) => item.id === entryId)
     if (!entry) fail(404, "今天没有这张单")
     // 病人可能已经不在档案里（孤儿条目）：名字拿得到就用，拿不到也照样能拿掉。
@@ -538,6 +568,8 @@ export const entryMethods = {
       if (!condition) continue
       if (condition.fresh || updateCondition) this.writeCondition(patient, condition, entry)
     }
+    // 答过这一轮就不再问：再改动（leaveAsk 重新亮起）前，反复进出病人页都直接走。
+    entry.divergedAcked = !updateCondition
     this.save()
     this.audit(deviceId, "离开病人页", { 回写病症: updateCondition })
     return this.entryView(deviceId, entry.id)
@@ -552,6 +584,8 @@ export const entryMethods = {
       entry.chiefSide = condition.chiefSide || null
     }
     const have = new Set(entry.items.filter((item) => item.conditionId === conditionId).map((item) => item.sourceItemId))
+    // 单人治疗室里挂进来的档案项照旧记在那个人名下。
+    const soloStaffId = this.state.staff.length === 1 ? this.state.staff[0].id : null
     for (const item of condition.items) {
       if (have.has(item.id)) continue
       entry.items.push({
@@ -563,7 +597,7 @@ export const entryMethods = {
         technique: item.technique,
         direction: item.direction,
         dose: structuredClone(item.dose),
-        assigneeId: null,
+        assigneeId: soloStaffId,
         done: false,
         completedBy: null,
       })
