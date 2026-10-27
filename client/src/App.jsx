@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from "react"
 import { api, getDeviceId } from "./api.js"
+import { parseChangeEvent } from "@shared/events.js"
 import { Gate } from "./screens/Gate.jsx"
 import { Today } from "./screens/Today.jsx"
 
@@ -79,12 +80,8 @@ export default function App() {
     let debounce
     source.onmessage = (event) => {
       // 自己改的数据服务器会带上 origin，应用返回值时已经拿到了最新状态，不用再拉一遍。
-      try {
-        const payload = JSON.parse(event.data)
-        if (payload?.origin && payload.origin === getDeviceId()) return
-      } catch {
-        // 解析不了就当普通事件处理
-      }
+      const payload = parseChangeEvent(event.data)
+      if (payload?.origin && payload.origin === getDeviceId()) return
       clearTimeout(debounce)
       debounce = setTimeout(() => setPulse((n) => n + 1), 400)
     }
@@ -145,6 +142,7 @@ export default function App() {
           entryId={entryId}
           initial={entryInitial}
           pulse={pulse}
+          live={live}
           onBack={(result) => {
             setEntryId(null)
             setEntryInitial(null)

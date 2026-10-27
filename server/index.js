@@ -7,6 +7,7 @@ import express from "express"
 import compression from "compression"
 import { fileURLToPath } from "node:url"
 import { ClinicStore, todayKey } from "./store.js"
+import { changeEvent } from "../shared/events.js"
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 // DATA_DIR 给测试用：指向一次性目录，别碰真实档案。
@@ -150,7 +151,7 @@ let sseSeq = 0
 store.subscribe(() => {
   sseSeq += 1
   // origin 是改数据那台手机的 deviceId：自己的改动自己已经拿到返回值，不用再拉。
-  const payload = `data: ${JSON.stringify({ n: sseSeq, origin: currentOrigin })}\n\n`
+  const payload = `data: ${JSON.stringify(changeEvent(sseSeq, currentOrigin))}\n\n`
   for (const res of sseClients) {
     try {
       res.write(payload)

@@ -105,10 +105,18 @@ export const api = {
       method: "PATCH",
       body: { patch, ...(expectedVersion != null ? { expectedVersion } : {}) },
     }),
-  removeItem: (id, itemId) => request(withDevice(`/api/entries/${id}/items/${itemId}`), { method: "DELETE", body: {} }),
+  removeItem: (id, itemId, expectedVersion) =>
+    request(withDevice(`/api/entries/${id}/items/${itemId}`), {
+      method: "DELETE",
+      body: { ...(expectedVersion != null ? { expectedVersion } : {}) },
+    }),
   // 撤销删除：把删除前的完整项快照插回原位（含派工与完成）。
-  restoreItem: (id, index, item) =>
-    request(`/api/entries/${id}/items/restore`, { method: "POST", body: { index, item } }),
+  // afterIds 是删完之后清单本来的样子：服务端对得上才让按原位插回。
+  restoreItem: (id, index, item, afterIds) =>
+    request(`/api/entries/${id}/items/restore`, {
+      method: "POST",
+      body: { index, item, ...(Array.isArray(afterIds) ? { afterIds } : {}) },
+    }),
   reorder: (id, orderedIds, expectedVersion) =>
     request(`/api/entries/${id}/reorder`, {
       method: "POST",

@@ -653,7 +653,7 @@ function DoseControl({ label, value, minusLabel, plusLabel, pending, onCommit })
   )
 }
 
-export function PatientDay({ entryId, initial, pulse, onBack }) {
+export function PatientDay({ entryId, initial, pulse, live = true, onBack }) {
   const [entry, setEntry] = useState(null)
   const [staff, setStaff] = useState([])
   const [patients, setPatients] = useState([])
@@ -1082,14 +1082,31 @@ export function PatientDay({ entryId, initial, pulse, onBack }) {
     }
   }
 
-  // 左滑去掉之后给 5 秒反悔的机会：先删，撤销用 restore 把完整快照插回原位。
+  // 左滑去掉之后给反悔的机会：先删，撤销用 restore 把完整快照插回原位。
   function removeWithUndo(itemId) {
     const snapshot = entry?.items || []
     const index = snapshot.findIndex((item) => item.id === itemId)
     const item = index >= 0 ? itemSnapshot(snapshot[index]) : null
+    // 撤销校验用：删完之后清单本来的样子，服务端对得上才按原位插回。
+    const afterIds = snapshot.filter((row) => row.id !== itemId).map((row) => row.id)
+    let removedElsewhere = false
     setUndo(null)
-    return mutate(() => api.removeItem(entryId, itemId), { fail: "未能保存" }).then((ok) => {
-      if (ok && item) setUndo({ item, index })
+    return mutate(
+      () =>
+        api.removeItem(entryId, itemId, entry?.version).catch(async (err) => {
+          // 撞单（409）先重拉：项还在就自动再删一次；已经没了说明别人删过，也算达成。
+          if (!isConflictError(err)) throw err
+          const fresh = await api.entry(entryId)
+          const stillThere = fresh.entry?.items?.some((row) => row.id === itemId)
+          if (!stillThere) {
+            removedElsewhere = true
+            return fresh
+          }
+          return api.removeItem(entryId, itemId, fresh.entry?.version)
+        }),
+      { fail: "未能保存" },
+    ).then((ok) => {
+      if (ok && item && !removedElsewhere) setUndo({ item, index, afterIds })
     })
   }
 
@@ -1097,7 +1114,7 @@ export function PatientDay({ entryId, initial, pulse, onBack }) {
     const target = undo
     if (!target) return
     setUndo(null)
-    mutate(() => api.restoreItem(entryId, target.index, target.item), {
+    mutate(() => api.restoreItem(entryId, target.index, target.item, target.afterIds), {
       success: "已恢复",
       fail: "未能恢复",
     })
@@ -1336,6 +1353,9 @@ export function PatientDay({ entryId, initial, pulse, onBack }) {
           返回
         </button>
         <h1>{entry.patientName}</h1>
+        {live === false ? (
+          <p className="patient-offline" role="status">连接断了，正在重连…恢复后自动刷新</p>
+        ) : null}
         {entry.archived ? <p className="muted">已归档 · 不会出现在加入病人列表</p> : null}
         {names ? <p className="patient-conditions">{names}</p> : null}
         {entry.note ? (

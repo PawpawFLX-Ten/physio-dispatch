@@ -1,5 +1,5 @@
 // 「说一句」快速开单的解析器。
-// 词表是封闭的（41 个目标 + 同义词、3 个手法、4 个方向、左右双、数字），
+// 词表是封闭的（41 个目标 + 同义词、4 个手法、4 个方向、左右双、数字），
 // 规则匹配就够，不需要模型：主治说一遍，助手打字或用键盘语音输入，直接变成清单。
 import { allowsChief, hasSides, targetById } from "./catalog.js"
 
@@ -93,6 +93,8 @@ export function parseQuickOrder(text) {
   }
   addAll(/按摩|揉捏|揉|推拿|按一按|按按|压一压|揉揉|推一推|按压/g, "technique", () => "massage")
   addAll(/松解|放松|松一下|松一松|松松/g, "technique", () => "release")
+  // 牵伸是常说的「拉伸」：以前没这个词会静默落回按摩，处方意图被吞掉。
+  addAll(/牵伸|拉伸|牵一牵|拉一拉|拉一下|拉开/g, "technique", () => "stretch")
   addAll(/器械|训练/g, "technique", () => "equipment")
   addAll(/沿肌纤维|顺肌纤维/g, "direction", () => "along")
   addAll(/逆着肌纤维|逆肌纤维/g, "direction", () => "against")

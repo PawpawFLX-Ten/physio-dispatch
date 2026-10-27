@@ -574,6 +574,14 @@
   font-weight: 700;
 }
 
+/* 实时连接断了：和今日单同款的细条，重连成功自动消失。 */
+.patient-offline {
+  margin: 4px 0 0;
+  color: #8a3a1c;
+  font-size: 14px;
+  font-weight: 700;
+}
+
 .field textarea {
   width: 100%;
   min-height: 72px;

@@ -173,7 +173,7 @@ export const viewMethods = {
       const person = assigneeId ? this.state.staff.find((row) => row.id === assigneeId) : null
       const key = person?.id || "none"
       if (!groups.has(key)) {
-        groups.set(key, { staffId: person?.id || null, name: person?.name || "未派", done: 0, total: 0, patients: new Map() })
+        groups.set(key, { staffId: person?.id || null, name: person?.name || "未派", done: 0, total: 0, minutes: 0, patients: new Map() })
       }
       return groups.get(key)
     }
@@ -184,6 +184,8 @@ export const viewMethods = {
         const bucket = bucketOf(item.assigneeId)
         bucket.total += 1
         if (item.done) bucket.done += 1
+        // 没做完的分钟数顺手累加：主治看「还剩多少活」不用再心算（器械按组次计，不折分钟）。
+        else if (Number(item.dose?.minutes) > 0) bucket.minutes += Math.round(item.dose.minutes)
         const row = bucket.patients.get(entry.patientId) || {
           entryId: entry.id,
           patientName: patient.name,

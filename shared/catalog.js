@@ -1,6 +1,7 @@
 export const TECHNIQUES = [
   { id: "massage", label: "按摩" },
   { id: "release", label: "松解" },
+  { id: "stretch", label: "牵伸" },
   { id: "equipment", label: "器械" },
 ]
 

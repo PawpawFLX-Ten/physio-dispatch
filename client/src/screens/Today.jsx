@@ -397,7 +397,10 @@ export function Today({ snap, live, onRefresh, onSnap, onOpen }) {
                 <section key={group.staffId || "none"} className="today-group">
                   <h2 className="today-group-title">
                     {group.name}
-                    <span className="today-group-count">{`${group.done}/${group.total}`}</span>
+                    <span className="today-group-count">
+                      {`${group.done}/${group.total}`}
+                      {group.minutes ? ` · 剩约${group.minutes}分钟` : ""}
+                    </span>
                   </h2>
                   <div className="today-list">
                     {group.patients.map((row) => (

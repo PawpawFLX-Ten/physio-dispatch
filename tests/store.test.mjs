@@ -1504,3 +1504,81 @@ test("import keeps completedAt only on items that are done", () => {
   assert.equal(saved[0].completedAt, "2000-01-01T03:00:00.000Z")
   assert.equal(saved[1].completedAt, null)
 })
+
+test("remove and restore guard against concurrent edits", () => {
+  const store = openStore()
+  setupRoom(store)
+  const created = store.createPatient({ deviceId: "doc", name: "周阿姨", conditionName: "腰" })
+  const entryId = created.entry.id
+  store.setChief({ deviceId: "doc", entryId, targetId: "lumbar" })
+  store.addItem({ deviceId: "doc", entryId, targetId: "erector-spinae" })
+  store.addItem({ deviceId: "doc", entryId, targetId: "rhomboid" })
+  const items = store.entryById(entryId).items
+  const version = store.entryView("doc", entryId).entry.version
+  // 带过期版本删除：拒绝，别在别人改过的单上盲删。
+  assert.throws(
+    () => store.removeItem({ deviceId: "doc", entryId, itemId: items[0].id, expectedVersion: version + 5 }),
+    /别人刚改过/,
+  )
+  // 正确版本删除成功；清单签名 = 删完之后本来的样子。
+  store.removeItem({ deviceId: "doc", entryId, itemId: items[0].id, expectedVersion: version })
+  const afterIds = store.entryById(entryId).items.map((row) => row.id)
+  assert.equal(afterIds.length, 1)
+  // 别人又加了一项：签名对不上，撤销按原位插回被拒。
+  store.addItem({ deviceId: "aide", entryId, targetId: "trapezius" })
+  assert.throws(
+    () => store.restoreItem({ deviceId: "doc", entryId, index: 0, item: structuredClone(items[0]), afterIds }),
+    /自动放回/,
+  )
+  // 撤掉那人加的项，签名恢复一致：能原位插回。
+  const aideItem = store.entryById(entryId).items.find((row) => row.targetId === "trapezius")
+  store.removeItem({ deviceId: "aide", entryId, itemId: aideItem.id })
+  const restored = store.restoreItem({ deviceId: "doc", entryId, index: 0, item: structuredClone(items[0]), afterIds })
+  assert.equal(restored.entry.items[0].targetId, "erector-spinae")
+  assert.equal(restored.entry.items[1].id, items[1].id)
+})
+
+test("stretch is a first-class technique and keeps minutes when switching", () => {
+  const store = openStore()
+  setupRoom(store)
+  const created = store.createPatient({ deviceId: "doc", name: "吴叔叔", conditionName: "腿" })
+  const entryId = created.entry.id
+  store.setChief({ deviceId: "doc", entryId, targetId: "knee" })
+  const added = store.addItem({ deviceId: "doc", entryId, targetId: "hamstring" })
+  const itemId = added.entry.items[0].id
+  // 松解调好 12 分钟，换牵伸时长保留（和按摩↔松解同一规则）。
+  store.patchItem({ deviceId: "doc", entryId, itemId, patch: { technique: "release", dose: { minutes: 12 } } })
+  const switched = store.patchItem({ deviceId: "doc", entryId, itemId, patch: { technique: "stretch" } })
+  assert.equal(switched.entry.items[0].technique, "stretch")
+  assert.equal(switched.entry.items[0].dose.minutes, 12)
+  // 说一句带牵伸也能入库，按分钟计。
+  const quick = store.quickAdd({
+    deviceId: "doc",
+    entryId,
+    items: [{ targetId: "gastroc", side: "left", technique: "stretch", direction: "along", dose: { minutes: 10 } }],
+  })
+  assert.equal(quick.entry.items[1].technique, "stretch")
+  assert.equal(quick.entry.items[1].dose.minutes, 10)
+})
+
+test("staff buckets carry remaining minutes for the by-person view", () => {
+  const store = openStore()
+  setupRoom(store)
+  const created = store.createPatient({ deviceId: "doc", name: "郑阿姨", conditionName: "膝" })
+  const entryId = created.entry.id
+  store.setChief({ deviceId: "doc", entryId, targetId: "knee" })
+  store.addItem({ deviceId: "doc", entryId, targetId: "hamstring" })
+  store.addItem({ deviceId: "doc", entryId, targetId: "soleus" })
+  store.patchItem({ deviceId: "doc", entryId, itemId: store.entryById(entryId).items[1].id, patch: { dose: { minutes: 10 } } })
+  const items = store.entryById(entryId).items
+  store.patchItem({ deviceId: "doc", entryId, itemId: items[0].id, patch: { done: true } })
+  const group = store.view("doc").todayByStaff.find((row) => row.staffId)
+  // 完成的 8 分钟不算，没完成的 10 分钟算上。
+  assert.equal(group.done, 1)
+  assert.equal(group.total, 2)
+  assert.equal(group.minutes, 10)
+  // 器械按组次计，不折分钟。
+  store.patchItem({ deviceId: "doc", entryId, itemId: items[1].id, patch: { technique: "equipment" } })
+  const after = store.view("doc").todayByStaff.find((row) => row.staffId)
+  assert.equal(after.minutes, 0)
+})

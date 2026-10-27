@@ -144,6 +144,15 @@ test("colloquial technique phrases parse", () => {
   assert.equal(parseQuickOrder("腘绳肌松一下").unknown.length, 0)
 })
 
+test("stretch parses as its own technique instead of silently becoming massage", () => {
+  const parsed = parseQuickOrder("腘绳肌牵伸十分钟")
+  assert.equal(parsed.items[0].technique, "stretch")
+  assert.equal(parsed.items[0].dose.minutes, 10)
+  assert.equal(parseQuickOrder("小腿肚拉伸8分钟").items[0].technique, "stretch")
+  assert.equal(parseQuickOrder("腘绳肌拉一下").items[0].technique, "stretch")
+  assert.equal(parseQuickOrder("腘绳肌拉一拉，比目鱼肌").items[1].technique, "stretch")
+})
+
 test("connective words do not pollute unknown list", () => {
   const parsed = parseQuickOrder("冈上肌还有冈下肌，以及斜方肌顺便松一下")
   assert.equal(parsed.items.length, 3)

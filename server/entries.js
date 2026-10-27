@@ -462,21 +462,32 @@ export const entryMethods = {
     return this.entryView(deviceId, entry.id)
   },
 
-  removeItem({ deviceId, entryId, itemId }) {
+  removeItem({ deviceId, entryId, itemId, expectedVersion }) {
     this.requireStaff(deviceId)
     const entry = this.entryById(entryId)
-    const item = entry.items.find((row) => row.id === itemId)
+    // 删除也带期望版本：别人刚改过这张单时别盲目删，让客户端重拉后再说。
+    assertExpectedVersion(entry, expectedVersion)
+    const item = entry.items.find((item) => item.id === itemId)
     entry.items = entry.items.filter((item) => item.id !== itemId)
     touchDiverged(entry)
+    bumpEntryVersion(entry)
     this.save()
     this.audit(deviceId, "去掉一项", { 项: item ? targetTitle(item.targetId, item.side || null) : itemId })
     return this.entryView(deviceId, entry.id)
   },
 
   // 撤销删除：把快照插回原位，派工和完成状态原样保留，但换新 id。
-  restoreItem({ deviceId, entryId, index, item }) {
+  restoreItem({ deviceId, entryId, index, item, afterIds }) {
     this.requireStaff(deviceId)
     const entry = this.entryById(entryId)
+    // 撤销只对「删完之后」的清单负责：别人又加/删/重排过，老位置就不再可靠，
+    // 宁可提示手动加回，也不把项插到语义错位的地方。
+    if (Array.isArray(afterIds)) {
+      const currentIds = entry.items.map((row) => row.id)
+      if (currentIds.length !== afterIds.length || currentIds.some((id, at) => id !== afterIds[at])) {
+        fail(409, "别人刚改过这张单，这一项没法自动放回，请在加项里重新点")
+      }
+    }
     const at = Number(index)
     if (!Number.isInteger(at) || at < 0 || at > entry.items.length) fail(400, "插回位置不对")
     if (!item || typeof item !== "object") fail(400, "缺少要插回的项")
@@ -507,6 +518,7 @@ export const entryMethods = {
     }
     entry.items.splice(at, 0, restored)
     touchDiverged(entry)
+    bumpEntryVersion(entry)
     this.save()
     this.audit(deviceId, "插回一项", { 项: targetTitle(restored.targetId, restored.side) })
     return this.entryView(deviceId, entry.id)
