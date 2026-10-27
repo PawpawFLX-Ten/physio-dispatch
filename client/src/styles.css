@@ -1,24 +1,25 @@
 :root {
   /* 调色板令牌：浅色是原配色，深色整套跟随系统（prefers-color-scheme）。
      零操作零设置：昏暗治疗室里自动换，不改任何交互。 */
-  --ink: var(--ink);
-  --ink-2: var(--ink-2);
-  --page: var(--page);
-  --bg: var(--bg);
-  --card: var(--card);
-  --card-2: var(--card-2);
-  --line: var(--line);
-  --muted: var(--muted);
-  --muted-2: var(--muted-2);
-  --muted-3: var(--muted-3);
-  --soft: var(--soft);
-  --ink-list: var(--ink-list);
-  --accent: var(--accent);
-  --accent-bg: var(--accent-bg);
-  --press: var(--press);
-  --danger: var(--danger);
-  --danger-strong: var(--danger-strong);
-  --danger-bg: var(--danger-bg);
+  --ink: #1c1915;
+  --ink-2: #3a2f26;
+  --page: #d9d2c5;
+  --bg: #f6f1e7;
+  --card: #fffdf8;
+  --card-veil: #fffdf8e6;
+  --card-2: #fbf6ee;
+  --line: #e4dccb;
+  --muted: #5e584e;
+  --muted-2: #6b5c4c;
+  --muted-3: #6f675c;
+  --soft: #8a7a68;
+  --ink-list: #4a3b32;
+  --accent: #0f5f5c;
+  --accent-bg: #e7f0ef;
+  --press: #efe7d8;
+  --danger: #8d3418;
+  --danger-strong: #a2241c;
+  --danger-bg: #f7ddd8;
 }
 [data-theme="dark"] {
   --ink: #ece5d8;
@@ -26,6 +27,7 @@
   --page: #12100d;
   --bg: #201d18;
   --card: #2a261f;
+  --card-veil: #2a261fe6;
   --card-2: #26221b;
   --line: #3d372c;
   --muted: #a89f8d;
