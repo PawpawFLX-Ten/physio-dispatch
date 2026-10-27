@@ -1,6 +1,7 @@
 // 预览人体使用 BodyParts3D 网格。正式小程序用同一批 glb，改由 xr-frame 加载。
 import { useEffect, useRef, useState } from "react"
 import {
+  BatchedMesh,
   Box3,
   DirectionalLight,
   Group,
@@ -120,6 +121,7 @@ export function BodyStage({ chiefSiteId, chiefSide, items, reselecting, onSelect
     let renderer = null
     let labelRenderer = null
     let resizeObserver = null
+    const batchedMeshes = []
 
     // 按需渲染：场景只在旋转/缩放/标记变化时重画一帧，静止时不空转 60fps。
     let dirty = true
@@ -152,9 +154,14 @@ export function BodyStage({ chiefSiteId, chiefSide, items, reselecting, onSelect
         delete view.dataset.ready
         delete view.dataset.picks
         delete view.dataset.camera
+        delete view.dataset.meshes
+        delete view.dataset.bounds
       }
       for (const geometry of geos) geometry.dispose()
       for (const material of mats) material.dispose()
+      // BatchedMesh 的内部缓冲是自己开的，得自己收。
+      for (const batched of batchedMeshes) batched.dispose()
+      batchedMeshes.length = 0
       geos.clear()
       mats.clear()
       try {
@@ -260,48 +267,48 @@ export function BodyStage({ chiefSiteId, chiefSide, items, reselecting, onSelect
         }
       }
 
-      figure.add(rig)
-      figure.updateWorldMatrix(true, true)
-      const measured = new Box3().setFromObject(content)
-      const measuredSize = measured.getSize(new Vector3())
-      const height = measuredSize.y || 1
-      rig.scale.setScalar(1.68 / height)
-      rig.updateMatrixWorld(true)
-      const fitted = new Box3().setFromObject(rig)
-      rig.position.set(
-        -(fitted.min.x + fitted.max.x) / 2,
-        -fitted.min.y,
-        -(fitted.min.z + fitted.max.z) / 2,
-      )
-      figure.updateWorldMatrix(true, true)
-
       const boneMat = useMat(new MeshStandardMaterial({ color: BONE, roughness: 0.72, metalness: 0.02 }))
       const muscleMat = useMat(new MeshStandardMaterial({ color: MUSCLE, roughness: 0.58, metalness: 0.02 }))
+      let contextMeshCount = 0
 
-      // 一个组（目标×侧别，或上下文×组织）进一个材质；材质进 markers 供上色/透视用。
+      // 一组（目标×侧别，或上下文×组织）一个 BatchedMesh：一组一次 draw call。
+      // 量化的反量化矩阵留在网格节点上（烤进几何会破坏量化属性），所以每件带着
+      // 自己的矩阵进批；同一变换的件先 mergeGeometries 再进批，批数更少。
       function mountGroup(group, material, base) {
+        const pieces = []
         for (const bucket of group.buckets.values()) {
           const merged = bucket.geometries.length > 1 ? mergeGeometries(bucket.geometries, false) : null
-          // 合不了（属性不一致）就退回单件网格：少省点 draw call，行为不比不合并差。
-          const pieces = merged ? [merged] : bucket.geometries
           if (merged) geos.add(merged)
-          for (const geometry of pieces) {
-            const mesh = new Mesh(geometry, material)
-            mesh.userData.targetId = group.targetId
-            mesh.userData.side = group.side
-            const holder = new Group()
-            holder.matrixAutoUpdate = false
-            holder.matrix.copy(bucket.matrix)
-            holder.add(mesh)
-            content.add(holder)
-            if (group.targetId) pickMeshes.push(mesh)
+          for (const geometry of merged ? [merged] : bucket.geometries) {
+            pieces.push({ geometry, matrix: bucket.matrix })
           }
         }
-        if (!group.targetId) return
-        markers.push({ id: group.targetId, material, base, side: group.side })
-        const list = anchors.get(markKey(group.targetId, group.side)) || []
-        for (const box of group.boxes) list.push(box.getCenter(new Vector3()))
-        anchors.set(markKey(group.targetId, group.side), list)
+        if (!pieces.length) return
+        let totalVerts = 0
+        let totalIndices = 0
+        for (const piece of pieces) {
+          totalVerts += piece.geometry.getAttribute("position").count
+          const index = piece.geometry.getIndex()
+          totalIndices += index ? index.count : 0
+        }
+        const batched = new BatchedMesh(pieces.length, totalVerts, Math.max(totalIndices, 1), material)
+        for (const piece of pieces) {
+          const geometryId = batched.addGeometry(piece.geometry)
+          const instanceId = batched.addInstance(geometryId)
+          batched.setMatrixAt(instanceId, piece.matrix)
+        }
+        batched.computeBoundingSphere()
+        batched.userData.targetId = group.targetId
+        batched.userData.side = group.side
+        content.add(batched)
+        batchedMeshes.push(batched)
+        if (group.targetId) {
+          pickMeshes.push(batched)
+          group.material = material
+          group.base = base
+        } else {
+          contextMeshCount += 1
+        }
       }
 
       for (const group of contextGroups.values()) {
@@ -311,6 +318,44 @@ export function BodyStage({ chiefSiteId, chiefSide, items, reselecting, onSelect
         const base = restingColor(group.targetId, group.tissue)
         mountGroup(group, useMat(new MeshStandardMaterial({ color: base, roughness: 0.62, metalness: 0.02 })), base)
       }
+
+      // 量体归一化必须在挂载之后：量一个空的 content 会把 rig.position 算成 NaN，
+      // 整个人体的世界矩阵跟着变 NaN，一个像素都画不出来。
+      figure.add(rig)
+      figure.updateWorldMatrix(true, true)
+      const measured = new Box3().setFromObject(content)
+      const measuredSize = measured.getSize(new Vector3())
+      const height = measuredSize.y || 1
+      rig.scale.setScalar(1.68 / height)
+      rig.updateMatrixWorld(true)
+      const fitted = new Box3().setFromObject(rig)
+      const fittedValues = [fitted.min.x, fitted.min.y, fitted.min.z, fitted.max.x, fitted.max.y, fitted.max.z]
+      if (fittedValues.every(Number.isFinite)) {
+        rig.position.set(
+          -(fitted.min.x + fitted.max.x) / 2,
+          -fitted.min.y,
+          -(fitted.min.z + fitted.max.z) / 2,
+        )
+      }
+      figure.updateWorldMatrix(true, true)
+
+      // 分组包围盒是缩放前算的；rig 只有平移+均匀缩放，搬进最终空间 v' = p + s·v，
+      // 穴位球、标签锚点才和网格在同一个坐标系里。
+      const fittedScale = rig.scale.x
+      const fittedShift = rig.position
+      const liftBox = (box) => {
+        box.min.multiplyScalar(fittedScale).add(fittedShift)
+        box.max.multiplyScalar(fittedScale).add(fittedShift)
+        return box
+      }
+      for (const group of pickGroups.values()) {
+        group.boxes = group.boxes.map(liftBox)
+        markers.push({ id: group.targetId, material: group.material, base: group.base, side: group.side })
+        const list = anchors.get(markKey(group.targetId, group.side)) || []
+        for (const box of group.boxes) list.push(box.getCenter(new Vector3()))
+        anchors.set(markKey(group.targetId, group.side), list)
+      }
+      for (let i = 0; i < footBoxes.length; i++) liftBox(footBoxes[i])
 
       const groupsOf = (id) => [...pickGroups.values()].filter((group) => group.targetId === id)
       const unionBox = (boxes) => {
@@ -466,6 +511,12 @@ export function BodyStage({ chiefSiteId, chiefSide, items, reselecting, onSelect
       }
       view.dataset.picks = JSON.stringify(picks)
       view.dataset.camera = JSON.stringify(BODY_CAMERA)
+      // 调试/自检钩子：件数和最终包围盒。归一化出过 NaN（整屏空白）的事故就靠这两个值兜住。
+      view.dataset.meshes = String(pickMeshes.length + contextMeshCount)
+      const allBounds = new Box3().setFromObject(figure)
+      view.dataset.bounds = allBounds.isEmpty()
+        ? ""
+        : JSON.stringify({ min: roundPoint(allBounds.min), max: roundPoint(allBounds.max) })
       view.dataset.ready = "1"
       if (mounted) setPhase("ready")
     }
@@ -660,7 +711,15 @@ export function BodyStage({ chiefSiteId, chiefSide, items, reselecting, onSelect
         }
       }
       tick()
-      loadBody(figure).catch(() => fail())
+      loadBody(figure).catch((err) => {
+        // 加载失败的具体原因挂到节点上：真机上没法开 devtools，还能从 dataset 里看出来。
+        try {
+          view.dataset.error = String(err?.message || err)
+        } catch {
+          /* dataset 不可用就算了 */
+        }
+        fail()
+      })
     } catch {
       fail()
     }
