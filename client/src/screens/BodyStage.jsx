@@ -189,6 +189,10 @@ export function BodyStage({ chiefSiteId, chiefSide, items, reselecting, onSelect
     const markers = []
     const pickMeshes = []
     const anchors = new Map()
+    // 透视时被调淡的材质（点选要避开）+ 目标→材质映射（吸附时按目标查），随 applyMarks 重建。
+    const dimmedMaterials = new Set()
+    const materialByTarget = new Map()
+    let pickAnchors = {}
 
     function addMarker(position, targetId, radius) {
       const geometry = new SphereGeometry(radius, 18, 14)
@@ -475,12 +479,16 @@ export function BodyStage({ chiefSiteId, chiefSide, items, reselecting, onSelect
         for (const key of state.byKey.keys()) markedIds.add(String(key).split(":")[0])
         markedIds.delete(null)
         const xray = [...markedIds].some((id) => OCCLUDED_TARGETS.has(id))
+        dimmedMaterials.clear()
+        materialByTarget.clear()
+        for (const entry of markers) materialByTarget.set(entry.id, entry.material)
         const dim = (material, marked) => {
           if (material.opacity === 0) return // 隐形拾取球不参与透视
           const faint = xray && !marked
           material.transparent = faint
           material.opacity = faint ? 0.12 : 1
           material.depthWrite = !faint
+          if (faint) dimmedMaterials.add(material)
         }
         for (const entry of markers) dim(entry.material, markedIds.has(entry.id))
         dim(boneMat, false)
@@ -509,6 +517,7 @@ export function BodyStage({ chiefSiteId, chiefSide, items, reselecting, onSelect
         anchor.multiplyScalar(1 / used.length)
         picks[id] = roundPoint(anchor)
       }
+      pickAnchors = picks
       view.dataset.picks = JSON.stringify(picks)
       view.dataset.camera = JSON.stringify(BODY_CAMERA)
       // 调试/自检钩子：件数和最终包围盒。归一化出过 NaN（整屏空白）的事故就靠这两个值兜住。
@@ -586,9 +595,11 @@ export function BodyStage({ chiefSiteId, chiefSide, items, reselecting, onSelect
         if (rect.width < 1 || rect.height < 1) return
         pointer.x = ((clientX - rect.left) / rect.width) * 2 - 1
         pointer.y = -((clientY - rect.top) / rect.height) * 2 + 1
-        figure.updateMatrixWorld(true)
+        figure.updateWorldMatrix(true)
         raycaster.setFromCamera(pointer, camera)
-        const ranked = raycaster.intersectObjects(pickMeshes, false).map((hit) => {
+        // 透视开着时被调淡的组不参与点选：看得见谁就点得中谁，别让幽灵一样的浅层截走射线。
+        const active = pickMeshes.filter((mesh) => !dimmedMaterials.has(mesh.material))
+        const ranked = raycaster.intersectObjects(active, false).map((hit) => {
           const targetId = hit.object.userData.targetId
           return {
             hit,
@@ -597,11 +608,54 @@ export function BodyStage({ chiefSiteId, chiefSide, items, reselecting, onSelect
             distance: hit.distance,
           }
         })
-        const chosen = chooseBodyHit(ranked)
+        let chosen = chooseBodyHit(ranked)
+        if (chosen) {
+          // 隔骨不算：身体最近的命中若在这条选项之前且是上下文（肋骨挡着、打到的是身后的脊椎），
+          // 这次直点作废走吸附——点哪儿就是哪儿，别隔着胸腔选到腰。被调淡的组两边都不算。
+          const surface = raycaster.intersectObject(figure, true)[0]
+          if (
+            surface &&
+            surface.object !== chosen.hit.object &&
+            surface.distance < chosen.hit.distance - 1e-3 &&
+            !pickMeshes.includes(surface.object)
+          ) {
+            chosen = null
+          }
+        }
+        if (!chosen && raycaster.intersectObject(figure, true).length > 0) {
+          chosen = snapToNearest(clientX, clientY)
+        }
         const id = chosen?.targetId
         if (!id) return
-        const side = chosen.hit.object.userData.side ?? sideOf(chosen.hit.point, id)
+        const side = chosen.hit
+          ? chosen.hit.object.userData.side ?? sideOf(chosen.hit.point, id)
+          : chosen.side ?? null
         propsRef.current.onSelect?.(id, side)
+      }
+
+      // 锚点吸附：把各目标的锚点（左右各算一次）投影到屏幕，找点按位置最近的。
+      function snapToNearest(clientX, clientY) {
+        const rect = renderer.domElement.getBoundingClientRect()
+        const v = new Vector3()
+        let best = null
+        for (const [id, point] of Object.entries(pickAnchors)) {
+          if (dimmedMaterials.has(materialByTarget.get(id))) continue
+          const target = targetById(id)
+          if (!target) continue
+          const bothSides = hasSides(target)
+          const spots = bothSides ? [point, { x: -point.x, y: point.y, z: point.z }] : [point]
+          spots.forEach((spot, index) => {
+            v.set(spot.x, spot.y, spot.z).project(camera)
+            if (v.z < -1 || v.z > 1) return
+            const sx = rect.left + rect.width * (0.5 + v.x / 2)
+            const sy = rect.top + rect.height * (0.5 - v.y / 2)
+            const dist = Math.hypot(sx - clientX, sy - clientY)
+            if (dist >= 14 || (best && dist >= best.dist)) return
+            const rightSide = index === 0 ? spot.x >= 0 : spot.x < 0
+            best = { dist, targetId: id, side: bothSides ? (rightSide ? "right" : "left") : null }
+          })
+        }
+        return best ? { targetId: best.targetId, hit: null, side: best.side } : null
       }
 
       function onDown(event) {
