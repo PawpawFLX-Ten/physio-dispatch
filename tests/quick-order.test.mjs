@@ -76,7 +76,7 @@ test("erector spinae parses into its own work item", () => {
 })
 
 test("new arm and trunk muscles parse", () => {
-  const parsed = parseQuickOrder("左肩 肱二头肌按摩8分钟 然后三头肌松解，胸大肌按摩5分钟")
+  const parsed = parseQuickOrder("左肩 肱二头肌按摩8分钟 然后肱三头肌松解，胸大肌按摩5分钟")
   assert.equal(parsed.chief.targetId, "shoulder")
   assert.equal(parsed.chief.side, "left")
   assert.deepEqual(
@@ -84,6 +84,27 @@ test("new arm and trunk muscles parse", () => {
     ["biceps-brachii", "triceps-brachii", "pectoralis-major"],
   )
   assert.equal(parsed.items[0].side, "left")
+})
+
+test("prefixed muscle names must not be hijacked by the arm version", () => {
+  // 「股二头肌」曾被裸词「二头肌」静默错认成手臂的肱二头肌，unknown 还为空。
+  const thigh = parseQuickOrder("股二头肌松解八分钟")
+  assert.equal(thigh.items[0].targetId, "hamstring")
+  assert.equal(thigh.unknown.length, 0)
+  const surae = parseQuickOrder("小腿三头肌按摩")
+  assert.equal(surae.items[0].targetId, "gastroc")
+  assert.equal(surae.unknown.length, 0)
+  // 语音错字「骨二头肌」也认腘绳。
+  assert.equal(parseQuickOrder("骨二头肌松解").items[0].targetId, "hamstring")
+})
+
+test("bare er-tou/san-tou fall back to search instead of guessing the arm", () => {
+  const bare = parseQuickOrder("二头肌松解八分钟")
+  assert.equal(bare.items.length, 0)
+  assert.equal(bare.unknown.includes("二头肌"), true)
+  const bareTriceps = parseQuickOrder("三头肌按摩")
+  assert.equal(bareTriceps.items.length, 0)
+  assert.equal(bareTriceps.unknown.includes("三头肌"), true)
 })
 
 test("forearm groups parse", () => {

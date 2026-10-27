@@ -73,16 +73,27 @@ function itemSnapshot(item) {
     assigneeId: item.assigneeId || null,
     done: Boolean(item.done),
     completedBy: item.completedBy || null,
+    completedAt: item.completedAt || null,
   }
+}
+
+// 完成时刻只看时分：条目行和来过几次都印「HH:MM」。
+function clockOf(iso) {
+  const at = Date.parse(iso)
+  if (!Number.isFinite(at)) return ""
+  return new Date(at).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false })
 }
 
 function itemLine(item) {
   // 派给谁单独成钮，不塞进这一行说明。
+  const doneBit = item.done && item.completedByName
+    ? `${item.completedByName}完成${item.completedAt ? ` ${clockOf(item.completedAt)}` : ""}`
+    : ""
   return [
     techniqueLabel(item.technique),
     directionLabel(item.direction),
     doseLabel(item.technique, item.dose),
-    item.done && item.completedByName ? `${item.completedByName}完成` : "",
+    doneBit,
   ]
     .filter(Boolean)
     .join(" · ")
@@ -2105,6 +2116,7 @@ export function PatientDay({ entryId, initial, pulse, onBack }) {
                   <p className="patient-history-day">
                     {row.isToday ? "今天" : `${row.day.slice(5).replace("-", "月")}日`}
                     <span className="patient-history-count">{`${row.doneCount}/${row.total}`}</span>
+                    {row.lastDoneAt ? <span className="patient-history-time">{`完于 ${clockOf(row.lastDoneAt)}`}</span> : null}
                   </p>
                   <p className="patient-history-names">{row.names || "（这天没排项）"}</p>
                 </div>

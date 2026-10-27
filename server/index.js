@@ -18,8 +18,9 @@ const store = new ClinicStore(
 store.load()
 
 const app = express()
-// 上限 128MB：只给导入恢复留够（每天 20 单 × 7 项约 20-35MB/年）；普通请求体都是几百字节。
-app.use(express.json({ limit: "128mb" }))
+// 普通请求体都是几百字节：全局收紧到 64KB，免得没认过身份的设备一坨大 JSON 把单线程冻住。
+// 导入恢复是唯一的例外，走自己的路由：先过身份再按 128MB 解析（见 /api/data/import）。
+app.use(express.json({ limit: "64kb", type: (req) => req.path !== "/api/data/import" }))
 // 明文 HTTP 下 gzip：首访的 JS/CSS 少传约七成。SSE 绝不能压（会缓冲住实时推送）。
 app.use(
   compression({
@@ -57,7 +58,23 @@ app.get("/api/health", (_req, res) => res.json({ ok: true }))
 app.get("/api/session", asyncRoute((req) => store.view(String(req.query.deviceId || ""))))
 app.post("/api/setup", asyncRoute((req) => store.setup(req.body)))
 app.post("/api/claim", asyncRoute((req) => store.claim(req.body)))
-app.post("/api/data/import", asyncRoute((req) => store.importData(req.body)))
+// 导入要先认身份再解析大请求体：身份在 query 里（此时 body 还没解，解析也拿不到）。
+app.post(
+  "/api/data/import",
+  (req, res, next) => {
+    try {
+      store.requireStaff(String(req.query?.deviceId || ""))
+      next()
+    } catch (error) {
+      if (error.status) return res.status(error.status).json({ error: error.message || "先在名单里认个名字" })
+      console.error("[clinic]", error)
+      return res.status(500).json({ error: "服务器出了点问题，稍后再试" })
+    }
+  },
+  // 只给导入留够（每天 20 单 × 7 项约 20-35MB/年）。
+  express.json({ limit: "128mb" }),
+  asyncRoute((req) => store.importData(req.body)),
+)
 app.post("/api/patients", asyncRoute((req) => store.createPatient(req.body)))
 app.post("/api/patients/from-template", asyncRoute((req) => store.createPatientFromTemplate(req.body)))
 app.post("/api/patients/:id/note", asyncRoute((req) => store.setPatientNote({ ...req.body, patientId: req.params.id })))
@@ -190,7 +207,8 @@ if (fs.existsSync(path.join(dist, "index.html"))) {
 // 超限（导入的文件太大）和坏 JSON 各给一句能看懂的话。
 app.use((error, _req, res, _next) => {
   if (error?.type === "entity.too.large") {
-    return res.status(413).json({ error: "文件太大，超出能导入的上限（128MB）" })
+    const message = error.limit === "128mb" ? "文件太大，超出能导入的上限（128MB）" : "发过去的内容太大"
+    return res.status(413).json({ error: message })
   }
   if (error?.type === "entity.parse.failed" || error?.status === 400) {
     return res.status(400).json({ error: "发过去的数据不是有效的 JSON" })

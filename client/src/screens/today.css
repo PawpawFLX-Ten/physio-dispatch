@@ -295,7 +295,7 @@
   background: #fbf6ee;
   color: #6b5c4c;
   border-radius: 999px;
-  min-height: 36px;
+  min-height: 44px;
   padding: 0 16px;
   font-size: 15px;
   font-weight: 700;
@@ -341,8 +341,8 @@
 }
 
 .patient-last {
-  color: #8a7a68;
-  font-size: 14px;
+  color: #6b5c4c;
+  font-size: 15px;
   white-space: nowrap;
 }
 
@@ -377,14 +377,30 @@
 
 .today-note {
   color: #a2241c;
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 700;
+  justify-self: start;
+  padding: 1px 8px;
+  border-radius: 6px;
+  background: #f7ddd8;
   max-width: 100%;
   /* 禁忌是安全信息：允许占两行，别为了整洁截断。 */
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   overflow: hidden;
+}
+
+/* 来过几次：从历史自动数出来，不是谁手工记的。 */
+.today-visit {
+  color: #6b5c4c;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+/* 主界面上的失败提示（弹层关着时也看得见） */
+.today-error {
+  margin: 0 0 6px;
 }
 
 .today-repeat {
@@ -415,8 +431,8 @@
 
 .patient-last-summary {
   margin: 2px 12px 4px;
-  color: #6b5c4c;
-  font-size: 13px;
+  color: #5e584e;
+  font-size: 14px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -428,6 +444,10 @@
 }
 
 @media print {
+  @page {
+    margin: 12mm;
+  }
+
   body {
     background: #fff;
   }
@@ -444,6 +464,11 @@
   .print-sheet {
     display: block !important;
     padding: 0;
+  }
+
+  /* 一个人的条目挤在两页中间会漏看：整段尽量不跨页。 */
+  .print-section {
+    break-inside: avoid;
   }
 
   .print-sheet h1 {

@@ -1417,3 +1417,90 @@ test("carryUnunfinished finds yesterday's entry by id for the past-midnight phon
   )
   assert.throws(() => store.carryUnfinished({ deviceId: "doc", entryId }), /今天已经在单上/)
 })
+
+test("completing stamps a time; undo clears it; repeat-last starts clean", () => {
+  const store = openStore()
+  setupRoom(store)
+  const created = store.createPatient({ deviceId: "doc", name: "赵奶奶", conditionName: "腰" })
+  const entryId = created.entry.id
+  store.setChief({ deviceId: "doc", entryId, targetId: "lumbar" })
+  store.addItem({ deviceId: "doc", entryId, targetId: "erector-spinae" })
+  store.addItem({ deviceId: "doc", entryId, targetId: "rhomboid" })
+  const items = store.entryById(entryId).items
+  const done = store.patchItem({ deviceId: "aide", entryId, itemId: items[0].id, patch: { done: true } })
+  assert.equal(typeof done.entry.items[0].completedAt, "string")
+  assert.ok(!Number.isNaN(Date.parse(done.entry.items[0].completedAt)))
+  assert.equal(done.entry.items[1].completedAt, null)
+  // 撤销完成连时刻一起清掉
+  const undone = store.patchItem({ deviceId: "doc", entryId, itemId: items[0].id, patch: { done: false } })
+  assert.equal(undone.entry.items[0].completedAt, null)
+  // 再完成一次：按人分组里能拿到「完于几点」
+  store.patchItem({ deviceId: "doc", entryId, itemId: items[0].id, patch: { done: true } })
+  const flat = store.view("doc").todayByStaff.flatMap((group) => group.patients)
+  assert.equal(typeof flat[0].lastDoneAt, "string")
+  // 跨天照旧：复制出来的新单不带旧时刻
+  const today = todayKey()
+  store.state.days["2000-01-01"] = store.state.days[today]
+  delete store.state.days[today]
+  const patientRow = store.view("doc").patients.find((patient) => patient.name === "赵奶奶")
+  const repeated = store.repeatLastDay({ deviceId: "doc", patientId: patientRow.id })
+  assert.equal(repeated.entry.items.every((item) => item.completedAt === null && item.done === false), true)
+})
+
+test("visit count rides along in the today rows and history", () => {
+  const store = openStore()
+  setupRoom(store)
+  const created = store.createPatient({ deviceId: "doc", name: "钱阿姨", conditionName: "膝" })
+  const entryId = created.entry.id
+  const patientId = created.entry.patientId
+  store.setChief({ deviceId: "doc", entryId, targetId: "knee" })
+  store.addItem({ deviceId: "doc", entryId, targetId: "quad" })
+  const first = store.view("doc").today.find((entry) => entry.patientId === patientId)
+  assert.equal(first.visitCount, 1)
+  store.patchItem({ deviceId: "doc", entryId, itemId: store.entryById(entryId).items[0].id, patch: { done: true } })
+  store.leave({ deviceId: "doc", entryId, updateCondition: true })
+  // 第一趟挪到过去，第二趟再来：次数自己数出来，历史带完成时刻
+  const today = todayKey()
+  store.state.days["2000-01-01"] = store.state.days[today]
+  delete store.state.days[today]
+  const again = store.addExisting({ deviceId: "aide", patientId })
+  const row = again.today.find((entry) => entry.patientId === patientId)
+  assert.equal(row.visitCount, 2)
+  const past = again.entry.history.find((item) => item.day === "2000-01-01")
+  const now = again.entry.history.find((item) => item.isToday)
+  assert.equal(typeof past.lastDoneAt, "string")
+  assert.equal(now.lastDoneAt, null)
+})
+
+test("import keeps completedAt only on items that are done", () => {
+  const store = openStore()
+  setupRoom(store)
+  const dirty = {
+    staff: [{ id: "s1", name: "之之" }],
+    devices: {},
+    patients: [{ id: "p1", name: "测试", conditions: [{ id: "c1", name: "腰", items: [] }] }],
+    templates: [],
+    days: {
+      "2000-01-01": {
+        entries: [
+          {
+            id: "e1",
+            patientId: "p1",
+            conditionIds: ["c1"],
+            chiefSiteId: "lumbar",
+            items: [
+              { id: "i1", targetId: "erector-spinae", done: true, completedBy: "s1", completedAt: "2000-01-01T03:00:00.000Z" },
+              { id: "i2", targetId: "rhomboid", done: false, completedBy: "s1", completedAt: "2000-01-01T03:00:00.000Z" },
+            ],
+          },
+        ],
+      },
+    },
+    lastExportAt: null,
+    pairings: null,
+  }
+  store.importData({ deviceId: "doc", data: dirty })
+  const saved = store.state.days["2000-01-01"].entries[0].items
+  assert.equal(saved[0].completedAt, "2000-01-01T03:00:00.000Z")
+  assert.equal(saved[1].completedAt, null)
+})

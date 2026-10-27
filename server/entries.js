@@ -109,6 +109,7 @@ export const entryMethods = {
         assigneeId: item.assigneeId || null,
         done: false,
         completedBy: null,
+        completedAt: null,
       })),
     }
     this.day().entries.push(entry)
@@ -166,6 +167,7 @@ export const entryMethods = {
         assigneeId: item.assigneeId || null,
         done: false,
         completedBy: null,
+        completedAt: null,
       })),
     }
     this.day().entries.push(entry)
@@ -210,6 +212,7 @@ export const entryMethods = {
         assigneeId: previous?.assigneeId || staff.id,
         done: false,
         completedBy: null,
+        completedAt: null,
       })
       added += 1
     }
@@ -295,6 +298,7 @@ export const entryMethods = {
           assigneeId: soloStaffId,
           done: false,
           completedBy: null,
+          completedAt: null,
         })
       }
     }
@@ -386,6 +390,7 @@ export const entryMethods = {
       assigneeId: previous?.assigneeId || staff.id,
       done: false,
       completedBy: null,
+      completedAt: null,
     })
     touchDiverged(entry)
     this.save()
@@ -431,10 +436,13 @@ export const entryMethods = {
         if (!item.done) {
           item.done = true
           item.completedBy = staff.id
+          // 完成时刻跟着项走：交班、对账、事后还原顺序都靠它。
+          item.completedAt = new Date().toISOString()
         }
       } else {
         item.done = false
         item.completedBy = null
+        item.completedAt = null
       }
     }
     if (patch.dose && item.technique === "equipment") {
@@ -495,6 +503,7 @@ export const entryMethods = {
       assigneeId: typeof item.assigneeId === "string" ? item.assigneeId : null,
       done: Boolean(item.done),
       completedBy: typeof item.completedBy === "string" ? item.completedBy : null,
+      completedAt: item.done && typeof item.completedAt === "string" ? item.completedAt : null,
     }
     entry.items.splice(at, 0, restored)
     touchDiverged(entry)
@@ -613,6 +622,7 @@ export const entryMethods = {
         assigneeId: soloStaffId,
         done: false,
         completedBy: null,
+        completedAt: null,
       })
     }
     entry.focusConditionId = conditionId

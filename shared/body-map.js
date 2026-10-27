@@ -25,6 +25,19 @@ export const BODY_CAMERA = {
   lookY: 0.82,
 }
 
+// 被浅层完全盖住、射线点不到的目标：单子上有它们时模型自动「透视」，
+// 把无关的组调淡，好看见深层的颜色和序号（不用任何人按开关）。
+export const OCCLUDED_TARGETS = new Set([
+  "iliopsoas", // 髂腰肌：藏在腹腔里
+  "piriformis", // 梨状肌：被臀肌盖住
+  "popliteus", // 腘肌：膝关节深面
+  "tib-posterior", // 胫骨后肌：小腿深层
+  "fdl", // 趾长屈肌：小腿深层
+  "subscapularis", // 肩胛下肌：肩胛骨深面
+  "pectoralis-minor", // 胸小肌：胸大肌深面
+  "erector-spinae", // 竖脊肌胸段：被斜方肌/菱形肌盖住（README 同款说明）
+])
+
 const TARGET_BY_SLUG = {
   patella: "knee",
   "tibiofemoral-joint": "knee",

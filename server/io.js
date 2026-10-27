@@ -8,6 +8,8 @@ const BACKUP_KEEP = 30
 const BACKUP_KEEP_DAYS = 30
 const BACKUP_NAME = /^clinic-\d{8}-\d{6}\.json$/
 const AUDIT_MAX_BYTES = 5 * 1024 * 1024
+// 单行审计的上限：改动内容（比如整段 patch）原样进日志会把文件撑爆，超长就折成预览。
+const AUDIT_LINE_MAX = 600
 
 function backupName(now = new Date()) {
   return `clinic-${now.getFullYear()}${two(now.getMonth() + 1)}${two(now.getDate())}-${two(now.getHours())}${two(now.getMinutes())}${two(now.getSeconds())}.json`
@@ -82,7 +84,12 @@ export const ioMethods = {
       fs.mkdirSync(path.dirname(this.auditFile), { recursive: true })
       const meId = this.device(deviceId)
       const me = this.state.staff.find((person) => person.id === meId)
-      const line = JSON.stringify({ t: new Date().toISOString(), who: me?.name || "", action, ...detail })
+      const base = { t: new Date().toISOString(), who: me?.name || "", action }
+      let line = JSON.stringify({ ...base, ...detail })
+      if (line.length > AUDIT_LINE_MAX) {
+        // 保持每行仍是合法 JSON，只是把改动折成截断的预览。
+        line = JSON.stringify({ ...base, 改动预览: JSON.stringify(detail).slice(0, 400) })
+      }
       fs.appendFileSync(this.auditFile, `${line}\n`)
       if (fs.statSync(this.auditFile).size > AUDIT_MAX_BYTES) this.rotateAudit()
     } catch {
@@ -95,7 +102,8 @@ export const ioMethods = {
     const base = path.basename(this.auditFile, path.extname(this.auditFile))
     fs.renameSync(this.auditFile, path.join(dir, `${base}-${Date.now()}.log`))
     const olds = fs.readdirSync(dir).filter((name) => name.startsWith(`${base}-`) && name.endsWith(".log")).sort()
-    for (const name of olds.slice(0, -2)) fs.rmSync(path.join(dir, name), { force: true })
+    // 留 12 份旧档（约 60MB）：留痕周期太短，出了争议翻不回去。
+    for (const name of olds.slice(0, -12)) fs.rmSync(path.join(dir, name), { force: true })
   },
 
   load() {
@@ -207,12 +215,20 @@ export const ioMethods = {
     const next = sanitizeState(data)
     // 导入的名单里有当前这个人，就保住这台手机的绑定，导入完不用重新进门。
     if (next.staff.some((person) => person.id === staff.id)) next.devices[deviceId] = staff.id
+    const prev = this.state
     this.state = next
     this.rebuildDayIndex()
-    // 先确认新数据能正常投影再落盘：万一视图还有意外，坏数据不至于写进档案。
-    const result = this.view(deviceId)
-    this.save()
-    this.audit(deviceId, "导入数据", { 病人: next.patients.length, 名单: next.staff.length })
-    return result
+    try {
+      // 先确认新数据能正常投影再落盘：万一视图还有意外，坏数据不至于写进档案。
+      const result = this.view(deviceId)
+      this.save()
+      this.audit(deviceId, "导入数据", { 病人: next.patients.length, 名单: next.staff.length })
+      return result
+    } catch (error) {
+      // 落盘失败（比如磁盘满）：内存回到导入前，别让内存和磁盘各说各话、重启后「回到过去」。
+      this.state = prev
+      this.rebuildDayIndex()
+      throw error
+    }
   },
 }

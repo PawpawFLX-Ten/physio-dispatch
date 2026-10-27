@@ -43,7 +43,10 @@ export function Today({ snap, live, onRefresh, onSnap, onOpen }) {
   const { ref: scrollRef, pull, refreshing } = usePullToRefresh({
     enabled: !open && !settings,
     onRefresh,
-    onSuccess: () => setBanner(""),
+    onSuccess: () => {
+      setBanner("")
+      setError("")
+    },
     onFail: (err) => setBanner(err instanceof Error ? err.message : "未能保存"),
   })
 
@@ -192,7 +195,13 @@ export function Today({ snap, live, onRefresh, onSnap, onOpen }) {
       0,
     )
     if (prevMineCount.current != null && mineCount > prevMineCount.current) {
-      navigator.vibrate?.(60)
+      if (typeof navigator.vibrate === "function") {
+        navigator.vibrate(60)
+      } else {
+        // iOS / 微信里没有震动：亮一条短横幅兜底，几秒后自己收掉。
+        setBanner(`有新活派给你，共 ${mineCount} 项`)
+        window.setTimeout(() => setBanner(""), 4000)
+      }
     }
     prevMineCount.current = mineCount
   }, [today, multi])
@@ -237,6 +246,19 @@ export function Today({ snap, live, onRefresh, onSnap, onOpen }) {
         onSnap(next)
       })
       .catch(async (err) => {
+        // 409 多半是两台手机同时动了同一张单：重拉一遍，这项还开着、还归自己就自动再试一次，
+        // 最高频的动作不该被冲突打断。重拉或重试都不成才把错误亮出来。
+        try {
+          const fresh = await api.entry(entry.id)
+          const item = fresh.entry?.items?.find((row) => row.id === entry.mineNextId)
+          if (item && !item.done && (!multi || item.assigneeId === snap.me?.id)) {
+            const next = await api.patchItem(entry.id, entry.mineNextId, { done: true }, fresh.entry?.version)
+            onSnap(next)
+            return
+          }
+        } catch {
+          /* 重拉也失败：按原来的错误报 */
+        }
         await onRefresh().catch(() => {})
         setError(err instanceof Error ? err.message : "未能保存")
       })
@@ -262,6 +284,16 @@ export function Today({ snap, live, onRefresh, onSnap, onOpen }) {
     return `上次 ${patient.lastDay.slice(5).replace("-", "月")}日`
   }
 
+  // 完成时刻只看时分：交班单上「完于 14:05」比完整时间戳好读。
+  function timeLabel(iso) {
+    const at = Date.parse(iso)
+    if (!Number.isFinite(at)) return ""
+    return new Date(at).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false })
+  }
+
+  // 微信内置浏览器调不起系统打印：别放一个点了没反应的按钮。
+  const canPrint = !/MicroMessenger/i.test(navigator.userAgent)
+
   return (
     <main className="screen today">
       {/* 打印时只出这一块：一页纸的交班单 */}
@@ -277,6 +309,8 @@ export function Today({ snap, live, onRefresh, onSnap, onOpen }) {
                 {group.patients.map((row) => (
                   <li key={row.entryId}>
                     {`${row.patientName} ${row.done}/${row.total}`}
+                    {row.lastDoneAt ? `　完于 ${timeLabel(row.lastDoneAt)}` : ""}
+                    {row.done < row.total ? "　□ 未完" : ""}
                     {row.note ? `　⚠ ${row.note}` : ""}
                   </li>
                 ))}
@@ -290,15 +324,21 @@ export function Today({ snap, live, onRefresh, onSnap, onOpen }) {
         <p className="muted today-sub">
           <span>{who}</span>
           <span className="today-sub-actions">
-            <button type="button" className="today-gear" onClick={() => window.print()}>
-              打印
-            </button>
+            {canPrint ? (
+              <button type="button" className="today-gear" onClick={() => window.print()}>
+                打印
+              </button>
+            ) : null}
             <button type="button" className="today-gear" onClick={() => setSettings(true)}>
               设置
             </button>
           </span>
         </p>
         {banner ? <p className="error">{banner}</p> : null}
+        {/* 弹层都关着时，行内完成这类主界面上的失败也要看得见：不能只弹回按钮。 */}
+        {error && !open && !settings ? (
+          <p className="error today-error" role="alert">{error}</p>
+        ) : null}
         {live === false ? (
           <p className="today-offline" role="status">连接断了，正在重连…恢复后自动刷新</p>
         ) : null}
@@ -404,6 +444,7 @@ export function Today({ snap, live, onRefresh, onSnap, onOpen }) {
                   >
                     <span className="today-name">{entry.patientName}</span>
                     {entry.note ? <span className="today-note">{`⚠ ${entry.note}`}</span> : null}
+                    {entry.visitCount > 1 ? <span className="today-visit">{`第${entry.visitCount}次来`}</span> : null}
                     {entry.conditionNames?.length ? (
                       <span className="today-conditions">{entry.conditionNames.join("、")}</span>
                     ) : null}

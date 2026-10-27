@@ -1,5 +1,5 @@
 // 「说一句」快速开单的解析器。
-// 词表是封闭的（33 个目标 + 同义词、3 个手法、4 个方向、左右双、数字），
+// 词表是封闭的（41 个目标 + 同义词、3 个手法、4 个方向、左右双、数字），
 // 规则匹配就够，不需要模型：主治说一遍，助手打字或用键盘语音输入，直接变成清单。
 import { allowsChief, hasSides, targetById } from "./catalog.js"
 
@@ -11,6 +11,10 @@ const TARGET_ALIASES = [
   // 语音输入的同音错字也认（腘/腓是生僻字，键盘话筒几乎必错）。
   ["腘绳肌", "hamstring"], ["腘绳", "hamstring"], ["大腿后侧", "hamstring"], ["大腿后", "hamstring"],
   ["国绳肌", "hamstring"], ["国绳", "hamstring"],
+  // 股二头肌是腘绳肌群的一头，别落进手臂的「二头肌」；「骨」是语音同音错字。
+  ["股二头肌", "hamstring"], ["骨二头肌", "hamstring"],
+  // 小腿三头肌落在腓肠肌（其主要部分），不能被手臂的「三头肌」截走。
+  ["小腿三头肌", "gastroc"],
   ["股四头肌", "quad"], ["股四头", "quad"], ["大腿前侧", "quad"], ["大腿前", "quad"],
   ["骨四头肌", "quad"], ["骨四头", "quad"], ["故四头", "quad"],
   ["臀", "glute"], ["屁股", "glute"],
@@ -34,8 +38,10 @@ const TARGET_ALIASES = [
   ["竖脊肌", "erector-spinae"], ["竖脊", "erector-spinae"], ["脊柱两侧", "erector-spinae"],
   ["胸大肌", "pectoralis-major"], ["胸小肌", "pectoralis-minor"],
   ["腹外斜肌", "obliquus-externus"], ["腹斜肌", "obliquus-externus"],
-  ["肱二头肌", "biceps-brachii"], ["二头肌", "biceps-brachii"],
-  ["肱三头肌", "triceps-brachii"], ["三头肌", "triceps-brachii"],
+  // 不收「二头肌/三头肌」裸词：任何带部位前缀的真名（股二头肌、小腿三头肌…）都可能包含它，
+  // 静默错认到手臂比认不出更危险；裸词落进 unknown 走「点一下进搜索」的既定兜底。
+  ["肱二头肌", "biceps-brachii"],
+  ["肱三头肌", "triceps-brachii"],
   ["肱桡肌", "brachioradialis"],
   ["前臂伸肌群", "forearm-extensors"], ["前臂伸肌", "forearm-extensors"],
   ["前臂屈肌群", "forearm-flexors"], ["前臂屈肌", "forearm-flexors"],

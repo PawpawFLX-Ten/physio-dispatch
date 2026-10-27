@@ -19,7 +19,7 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js"
 import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js"
 import { CSS2DObject, CSS2DRenderer } from "three/examples/jsm/renderers/CSS2DRenderer.js"
 import { hasSides, targetById, TARGETS } from "@shared/catalog.js"
-import { BODY_CAMERA, BODY_FILES, meshSlug, resolveMesh } from "@shared/body-map.js"
+import { BODY_CAMERA, BODY_FILES, meshSlug, OCCLUDED_TARGETS, resolveMesh } from "@shared/body-map.js"
 import { BODY_VERSION } from "@shared/body-assets.js"
 import { chooseBodyHit } from "@shared/body-pick.js"
 import {
@@ -31,11 +31,11 @@ import {
 import "./body.css"
 
 const DRAG_PX = 8
-// 要治的地方：偏暖、比骨表亮一档，仍比下手绿淡。
+// 要治的地方：暖橙。下手：冷色深蓝——橙/蓝是色相加明度双分离，
+// 红绿色弱的眼睛也能分清「哪里要治」和「哪里下手」，不再共用绿系。
 const CHIEF = 0xe08a4a
-// 下手：能看出左右，但不刺眼。
-const WORK = 0x3d8f6a
-const WORK_DONE = 0x8fad9c
+const WORK = 0x2e5fa3
+const WORK_DONE = 0x9aabc4
 const BONE = 0xeadccb
 const MUSCLE = 0xa24b38
 const NODE = 0x2f5f73
@@ -49,6 +49,7 @@ const gltfCache = new Map()
 const sharedLoader = new GLTFLoader()
 const sharedDraco = new DRACOLoader()
 sharedDraco.setDecoderPath(`/draco/`)
+sharedDraco.preload()
 sharedLoader.setDRACOLoader(sharedDraco)
 
 function loadBodyFile(file) {
@@ -406,6 +407,22 @@ export function BodyStage({ chiefSiteId, chiefSide, items, reselecting, onSelect
               role === "workDone" ? "body-stage-label is-done" : "body-stage-label"
           }
         }
+        // 深层肌肉被浅层盖住：单子上出现这类目标时自动「透视」，
+        // 无关的组调淡，颜色和序号才看得见。不需要任何人按开关。
+        const markedIds = new Set([state.chiefSiteId])
+        for (const key of state.byKey.keys()) markedIds.add(String(key).split(":")[0])
+        markedIds.delete(null)
+        const xray = [...markedIds].some((id) => OCCLUDED_TARGETS.has(id))
+        const dim = (material, marked) => {
+          if (material.opacity === 0) return // 隐形拾取球不参与透视
+          const faint = xray && !marked
+          material.transparent = faint
+          material.opacity = faint ? 0.12 : 1
+          material.depthWrite = !faint
+        }
+        for (const entry of markers) dim(entry.mesh.material, markedIds.has(entry.id))
+        dim(boneMat, false)
+        dim(muscleMat, false)
         invalidate()
       }
 
@@ -581,9 +598,21 @@ export function BodyStage({ chiefSiteId, chiefSide, items, reselecting, onSelect
       listen(view, "pointermove", onMove)
       listen(view, "pointerup", onUp)
       listen(view, "pointercancel", onCancel)
+      let contextLostRetried = false
       listen(renderer.domElement, "webglcontextlost", (event) => {
         event.preventDefault()
         fail()
+        // 上下文丢失多半能自己恢复：自动重建一次，别让人手点「重试」；
+        // 接连丢就不再硬试，交给手动重试。
+        if (!contextLostRetried && mounted) {
+          contextLostRetried = true
+          window.setTimeout(() => {
+            if (!mounted) return
+            setPhase("loading")
+            setProgress(0)
+            setAttempt((n) => n + 1)
+          }, 800)
+        }
       })
 
       function resize() {

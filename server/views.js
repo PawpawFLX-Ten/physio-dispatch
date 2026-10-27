@@ -87,6 +87,11 @@ export const viewMethods = {
         names: entry.items.map((item) => targetTitle(item.targetId, item.side || null)).join("、"),
         doneCount: entry.items.filter((item) => item.done).length,
         total: entry.items.length,
+        // 这一天最后一项完成的时刻（没有完成项就是空）：交班时知道干到几点。
+        lastDoneAt: entry.items.reduce((best, item) => {
+          if (!item.done || typeof item.completedAt !== "string") return best
+          return !best || item.completedAt > best ? item.completedAt : best
+        }, null),
       })
     }
     return rows.sort((left, right) => (left.day < right.day ? 1 : -1)).slice(0, limit)
@@ -147,9 +152,18 @@ export const viewMethods = {
       mineDone: mine.filter((item) => item.done).length,
       mineNextId: mineNext?.id || null,
       mineNextName: mineNext ? targetTitle(mineNext.targetId, mineNext.side || null) : "",
+      // 来过几天就是第几次：直接从索引数，不用任何人手工记疗程次数。
+      visitCount: this.visitCountOf(patient.id),
       version: entryVersion(entry),
       note: patient.note || "",
     }
+  },
+
+  visitCountOf(patientId) {
+    this.ensureDayIndex()
+    const days = new Set()
+    for (const visit of this.byPatient.get(patientId) || []) days.add(visit.day)
+    return days.size
   },
 
   // 主治一眼看谁手里多少活：按人分桶，未派的单独一桶。
@@ -176,9 +190,16 @@ export const viewMethods = {
           note: patient.note || "",
           done: 0,
           total: 0,
+          lastDoneAt: null,
         }
         row.total += 1
-        if (item.done) row.done += 1
+        if (item.done) {
+          row.done += 1
+          // 这位病人最后一项完成的时刻：交班单上印「完于几点」。
+          if (typeof item.completedAt === "string" && (!row.lastDoneAt || item.completedAt > row.lastDoneAt)) {
+            row.lastDoneAt = item.completedAt
+          }
+        }
         bucket.patients.set(entry.patientId, row)
       }
     }
@@ -222,6 +243,7 @@ export const viewMethods = {
       targetKind: target?.kind || "muscle",
       assigneeName: assignee?.name || "",
       completedBy: item.completedBy || null,
+      completedAt: item.completedAt || null,
       completedByName: closer?.name || "",
     }
   },

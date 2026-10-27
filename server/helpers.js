@@ -149,6 +149,7 @@ function sanitizeDayEntry(entry, staffIds) {
           assigneeId: typeof item.assigneeId === "string" && staffIds.has(item.assigneeId) ? item.assigneeId : null,
           done: Boolean(item.done),
           completedBy: typeof item.completedBy === "string" ? item.completedBy : null,
+          completedAt: item.done && typeof item.completedAt === "string" ? item.completedAt : null,
         }
       }),
   }

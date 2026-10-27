@@ -565,11 +565,12 @@
 
 .patient-note {
   color: #a2241c;
-  background: #fbeae7;
+  background: #f7ddd8;
   border-radius: 8px;
   padding: 6px 10px;
   margin: 4px 0 0;
-  font-size: 14px;
+  /* 禁忌是安全信息：字号不压过正文，一眼先看到它。 */
+  font-size: 17px;
   font-weight: 700;
 }
 
@@ -650,7 +651,8 @@
 
 .patient-history-day {
   display: flex;
-  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
   font-weight: 700;
   margin: 0 0 2px;
 }
@@ -658,6 +660,15 @@
 .patient-history-count {
   color: #6b5c4c;
   font-weight: 400;
+}
+
+/* 这天最后一项完成的时刻：交班时知道干到几点。 */
+.patient-history-time {
+  margin-left: auto;
+  color: #6b5c4c;
+  font-weight: 400;
+  font-size: 14px;
+  white-space: nowrap;
 }
 
 .patient-history-names {

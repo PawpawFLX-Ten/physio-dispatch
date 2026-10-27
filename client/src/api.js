@@ -152,6 +152,7 @@ export const api = {
     }
     return response.json()
   },
+  // deviceId 也在 URL 上带一份：服务端解析大请求体之前就先认身份。
   importClinic: (data) =>
-    request("/api/data/import", { method: "POST", body: { data }, timeout: IMPORT_TIMEOUT_MS }),
+    request(withDevice("/api/data/import"), { method: "POST", body: { data }, timeout: IMPORT_TIMEOUT_MS }),
 }
