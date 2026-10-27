@@ -32,7 +32,7 @@
 }
 
 .gate .name-btn:active {
-  background: #efe7d8;
+  background: var(--press);
 }
 
 .gate .field input {
@@ -40,7 +40,7 @@
 }
 
 .gate .dock {
-  background: #f6f1e7;
+  background: var(--bg);
 }
 
 .gate .dock .primary {

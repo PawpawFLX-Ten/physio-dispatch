@@ -6,8 +6,8 @@
   flex-direction: column;
   overflow: hidden;
   position: relative;
-  background: #f6f1e7;
-  color: #1c1915;
+  background: var(--bg);
+  color: var(--ink);
 }
 
 .patient-day button,
@@ -54,20 +54,20 @@
   border-radius: 999px;
   min-height: 40px;
   padding: 8px 14px;
-  background: #fffdf8;
-  box-shadow: inset 0 0 0 1px #e4dccb;
+  background: var(--card);
+  box-shadow: inset 0 0 0 1px var(--line);
   font-size: 16px;
 }
 
 .patient-chip.is-on {
-  background: #0f5f5c;
-  color: #f6f1e7;
+  background: var(--accent);
+  color: var(--bg);
   box-shadow: none;
 }
 
 .patient-conditions {
   margin: 4px 0 0;
-  color: #5e584e;
+  color: var(--muted);
   font-size: 18px;
 }
 
@@ -81,7 +81,7 @@
   flex: 0 0 42vh;
   overflow: hidden;
   contain: paint;
-  background: #ebe4d6;
+  background: var(--line);
 }
 
 .patient-stage > :first-child {
@@ -104,9 +104,9 @@
   padding: 0 12px;
   border: 0;
   border-radius: 999px;
-  background: #fffdf8e6;
-  box-shadow: inset 0 0 0 1px #e4dccb;
-  color: #5e584e;
+  background: var(--card)e6;
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--muted);
   font-size: 14px;
 }
 
@@ -117,8 +117,8 @@
   gap: 10px;
   padding: 8px 16px;
   min-height: 44px;
-  background: #ebe4d6;
-  color: #5e584e;
+  background: var(--line);
+  color: var(--muted);
 }
 
 .patient-hint {
@@ -143,11 +143,11 @@
 }
 
 .patient-notice.is-error {
-  color: #8d3418;
+  color: var(--danger);
 }
 
 .patient-notice.is-ok {
-  color: #0f5f5c;
+  color: var(--accent);
 }
 
 .patient-items {
@@ -167,8 +167,8 @@
   position: relative;
   overflow: hidden;
   border-radius: 16px;
-  background: #8d3418;
-  color: #f6f1e7;
+  background: var(--danger);
+  color: var(--bg);
 }
 
 .patient-row-delete {
@@ -190,10 +190,10 @@
   align-items: stretch;
   min-height: 84px;
   padding: 10px 8px 10px 12px;
-  background: #fffdf8;
-  color: #1c1915;
+  background: var(--card);
+  color: var(--ink);
   border-radius: 16px;
-  box-shadow: inset 0 0 0 1px #e4dccb;
+  box-shadow: inset 0 0 0 1px var(--line);
   touch-action: pan-y;
   user-select: none;
 }
@@ -221,7 +221,7 @@
   flex: none;
   min-width: 1.2em;
   font-size: 22px;
-  color: #5e584e;
+  color: var(--muted);
 }
 
 .patient-target {
@@ -235,7 +235,7 @@
 
 .patient-meta {
   margin: 2px 0 0;
-  color: #5e584e;
+  color: var(--muted);
   font-size: 15px;
   line-height: 1.35;
 }
@@ -247,8 +247,8 @@
   padding: 0 12px;
   border: 0;
   border-radius: 14px;
-  background: #0f5f5c;
-  color: #f6f1e7;
+  background: var(--accent);
+  color: var(--bg);
   font-size: 18px;
   white-space: nowrap;
 }
@@ -261,9 +261,9 @@
   padding: 0 10px;
   border: 0;
   border-radius: 14px;
-  background: #fffdf8;
-  color: #1c1915;
-  box-shadow: inset 0 0 0 1px #e4dccb;
+  background: var(--card);
+  color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--line);
   font-size: 16px;
   white-space: nowrap;
   overflow: hidden;
@@ -271,7 +271,7 @@
 }
 
 .patient-who.is-empty {
-  color: #8d3418;
+  color: var(--danger);
 }
 
 .patient-body-item {
@@ -281,8 +281,8 @@
   align-items: stretch;
   padding: 4px;
   border-radius: 14px;
-  background: #fffdf8;
-  box-shadow: inset 0 0 0 1px #e4dccb;
+  background: var(--card);
+  box-shadow: inset 0 0 0 1px var(--line);
 }
 
 .patient-body-item.is-done {
@@ -310,7 +310,7 @@
 }
 
 .patient-body-item-meta {
-  color: #5e584e;
+  color: var(--muted);
   font-size: 15px;
 }
 
@@ -321,7 +321,7 @@
 .patient-done.is-done,
 .patient-done.is-done:disabled {
   background: #e7efe6;
-  color: #0f5f5c;
+  color: var(--accent);
   box-shadow: inset 0 0 0 1px #c9ddd4;
 }
 
@@ -352,8 +352,8 @@
   width: 22px;
   height: 3px;
   border-radius: 99px;
-  background: #6f675c;
-  box-shadow: 0 -8px 0 #6f675c, 0 8px 0 #6f675c;
+  background: var(--muted-3);
+  box-shadow: 0 -8px 0 var(--muted-3), 0 8px 0 var(--muted-3);
 }
 
 .patient-actions {
@@ -364,7 +364,7 @@
   position: sticky;
   bottom: 0;
   padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
-  background: linear-gradient(#f6f1e700, #f6f1e7 28%);
+  background: linear-gradient(transparent, var(--bg) 28%);
 }
 
 .patient-day .primary,
@@ -386,8 +386,8 @@
   border: 0;
   border-radius: 14px;
   padding: 0 16px;
-  background: #fffdf8;
-  box-shadow: inset 0 0 0 1px #e4dccb;
+  background: var(--card);
+  box-shadow: inset 0 0 0 1px var(--line);
 }
 
 .patient-add .secondary {
@@ -410,7 +410,7 @@
   max-height: min(78%, 640px);
   overflow: auto;
   overscroll-behavior: contain;
-  background: #f6f1e7;
+  background: var(--bg);
   border-radius: 22px 22px 0 0;
   padding: 8px 16px calc(16px + env(safe-area-inset-bottom));
   box-shadow: 0 -8px 30px rgba(28, 25, 21, 0.12);
@@ -437,7 +437,7 @@
 
 .patient-label {
   margin: 0 0 8px;
-  color: #5e584e;
+  color: var(--muted);
   font-size: 18px;
 }
 
@@ -468,14 +468,14 @@
   border-radius: 14px;
   min-height: 52px;
   padding: 12px;
-  background: #fffdf8;
-  box-shadow: inset 0 0 0 1px #e4dccb;
+  background: var(--card);
+  box-shadow: inset 0 0 0 1px var(--line);
   font-size: 18px;
 }
 
 .patient-choice.is-on {
-  background: #0f5f5c;
-  color: #f6f1e7;
+  background: var(--accent);
+  color: var(--bg);
   box-shadow: none;
 }
 
@@ -490,8 +490,8 @@
   min-height: 56px;
   border: 0;
   border-radius: 14px;
-  background: #fffdf8;
-  box-shadow: inset 0 0 0 1px #e4dccb;
+  background: var(--card);
+  box-shadow: inset 0 0 0 1px var(--line);
   font-size: 28px;
 }
 
@@ -502,7 +502,7 @@
 
 .patient-day button:focus-visible,
 .patient-day input:focus-visible {
-  outline: 2px solid #0f5f5c;
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
@@ -515,8 +515,8 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  background: #3a2f26;
-  color: #f6ecdd;
+  background: var(--ink-2);
+  color: var(--card-2);
   border-radius: 12px;
   padding: 10px 14px;
   margin-top: 8px;
@@ -526,8 +526,8 @@
 .patient-undo-btn {
   border: 0;
   border-radius: 999px;
-  background: #f6ecdd;
-  color: #3a2f26;
+  background: var(--card-2);
+  color: var(--ink-2);
   min-height: 36px;
   padding: 0 18px;
   font-size: 15px;
@@ -536,15 +536,15 @@
 
 .patient-choice.is-last {
   box-shadow: inset 0 0 0 2px #c45c26;
-  background: #f7e8dd;
+  background: var(--danger-bg);
 }
 
 .patient-search {
   width: 100%;
   min-height: 44px;
-  border: 1px solid #d8c9b8;
+  border: 1px solid var(--line);
   border-radius: 10px;
-  background: #fff;
+  background: var(--card);
   padding: 0 12px;
   font-size: 16px;
   margin-bottom: 8px;
@@ -564,8 +564,8 @@
 }
 
 .patient-note {
-  color: #a2241c;
-  background: #f7ddd8;
+  color: var(--danger-strong);
+  background: var(--danger-bg);
   border-radius: 8px;
   padding: 6px 10px;
   margin: 4px 0 0;
@@ -577,7 +577,7 @@
 /* 实时连接断了：和今日单同款的细条，重连成功自动消失。 */
 .patient-offline {
   margin: 4px 0 0;
-  color: #8a3a1c;
+  color: var(--danger);
   font-size: 14px;
   font-weight: 700;
 }
@@ -585,9 +585,9 @@
 .field textarea {
   width: 100%;
   min-height: 72px;
-  border: 1px solid #d8c9b8;
+  border: 1px solid var(--line);
   border-radius: 10px;
-  background: #fff;
+  background: var(--card);
   padding: 8px 12px;
   font-size: 16px;
   font-family: inherit;
@@ -595,7 +595,7 @@
 }
 
 .patient-quick-preview {
-  background: #f6efe4;
+  background: var(--card-2);
   border-radius: 12px;
   padding: 10px 12px;
   margin-bottom: 10px;
@@ -618,7 +618,7 @@
 }
 
 .patient-quick-unknown {
-  color: #8a7a68;
+  color: var(--soft);
   font-size: 13px;
   margin: 0 0 6px;
 }
@@ -632,9 +632,9 @@
   line-height: 40px;
   border: 0;
   border-radius: 999px;
-  background: #fffdf8;
-  box-shadow: inset 0 0 0 1px #e4dccb;
-  color: #5e584e;
+  background: var(--card);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--muted);
   font-size: 15px;
 }
 
@@ -654,7 +654,7 @@
 
 .patient-history-row {
   padding: 8px 0;
-  border-bottom: 1px solid #eee2d3;
+  border-bottom: 1px solid var(--line);
 }
 
 .patient-history-day {
@@ -666,14 +666,14 @@
 }
 
 .patient-history-count {
-  color: #6b5c4c;
+  color: var(--muted-2);
   font-weight: 400;
 }
 
 /* 这天最后一项完成的时刻：交班时知道干到几点。 */
 .patient-history-time {
   margin-left: auto;
-  color: #6b5c4c;
+  color: var(--muted-2);
   font-weight: 400;
   font-size: 14px;
   white-space: nowrap;
@@ -682,6 +682,6 @@
 .patient-history-names {
   margin: 0;
   font-size: 14px;
-  color: #4a3b32;
+  color: var(--ink-list);
   line-height: 1.5;
 }

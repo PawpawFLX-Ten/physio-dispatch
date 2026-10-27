@@ -1,6 +1,48 @@
 :root {
-  color: #1c1915;
-  background: #d9d2c5;
+  /* 调色板令牌：浅色是原配色，深色整套跟随系统（prefers-color-scheme）。
+     零操作零设置：昏暗治疗室里自动换，不改任何交互。 */
+  --ink: var(--ink);
+  --ink-2: var(--ink-2);
+  --page: var(--page);
+  --bg: var(--bg);
+  --card: var(--card);
+  --card-2: var(--card-2);
+  --line: var(--line);
+  --muted: var(--muted);
+  --muted-2: var(--muted-2);
+  --muted-3: var(--muted-3);
+  --soft: var(--soft);
+  --ink-list: var(--ink-list);
+  --accent: var(--accent);
+  --accent-bg: var(--accent-bg);
+  --press: var(--press);
+  --danger: var(--danger);
+  --danger-strong: var(--danger-strong);
+  --danger-bg: var(--danger-bg);
+}
+[data-theme="dark"] {
+  --ink: #ece5d8;
+  --ink-2: #cabfae;
+  --page: #12100d;
+  --bg: #201d18;
+  --card: #2a261f;
+  --card-2: #26221b;
+  --line: #3d372c;
+  --muted: #a89f8d;
+  --muted-2: #9c9280;
+  --muted-3: #8f8674;
+  --soft: #867c6b;
+  --ink-list: #d8cfc0;
+  --accent: #35837d;
+  --accent-bg: #1d312e;
+  --press: #2e2a22;
+  --danger: #e0917a;
+  --danger-strong: #ff9d8a;
+  --danger-bg: #45201b;
+}
+:root {
+  color: var(--ink);
+  background: var(--page);
   font-family: "Avenir Next", "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
   font-size: 18px;
   line-height: 1.35;
@@ -16,22 +58,22 @@ button { cursor: pointer; }
 #root {
   width: min(430px, 100%);
   min-height: 100vh;
-  background: #f6f1e7;
+  background: var(--bg);
   position: relative;
 }
 
 .screen { min-height: 100vh; display: flex; flex-direction: column; padding: max(20px, env(safe-area-inset-top)) 16px 108px; }
 .screen h1 { font-size: 32px; line-height: 1.1; margin: 8px 0 12px; letter-spacing: -0.03em; }
-.muted { color: #5e584e; margin: 0 0 16px; }
+.muted { color: var(--muted); margin: 0 0 16px; }
 .stack { display: flex; flex-direction: column; gap: 12px; }
-.field { display: flex; flex-direction: column; gap: 6px; font-size: 15px; color: #5e584e; }
+.field { display: flex; flex-direction: column; gap: 6px; font-size: 15px; color: var(--muted); }
 .field input, .textline {
   border: 0;
-  background: #fffdf8;
+  background: var(--card);
   border-radius: 14px;
   min-height: 56px;
   padding: 0 16px;
-  box-shadow: inset 0 0 0 1px #e4dccb;
+  box-shadow: inset 0 0 0 1px var(--line);
 }
 /* iOS（含微信）对小于 16px 的输入框聚焦会强制放大且不还原：所有输入框至少 16px。 */
 .field input, .field textarea, .textline { font-size: 16px; }
@@ -41,16 +83,16 @@ button { cursor: pointer; }
   min-height: 56px;
   padding: 12px 16px;
 }
-.primary { background: #0f5f5c; color: #f6f1e7; }
-.secondary, .name-btn, .row-btn { background: #fffdf8; box-shadow: inset 0 0 0 1px #e4dccb; }
+.primary { background: var(--accent); color: var(--bg); }
+.secondary, .name-btn, .row-btn { background: var(--card); box-shadow: inset 0 0 0 1px var(--line); }
 .dock {
   position: sticky;
   bottom: 0;
   margin: 24px -16px -108px;
   padding: 12px 16px calc(16px + env(safe-area-inset-bottom));
-  background: linear-gradient(#f6f1e700, #f6f1e7 28%);
+  background: linear-gradient(transparent, var(--bg) 28%);
 }
-.error { color: #8d3418; min-height: 1.3em; }
+.error { color: var(--danger); min-height: 1.3em; }
 /* 首屏打不开时的重试钮：别让手机停在死屏上。 */
 .screen-retry { margin-top: 16px; width: 100%; }
 .topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }

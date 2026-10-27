@@ -24,7 +24,7 @@
 .today-gear {
   border: 0;
   background: transparent;
-  color: #0f5f5c;
+  color: var(--accent);
   min-height: 44px;
   padding: 0 4px;
   font-size: 16px;
@@ -32,8 +32,8 @@
 }
 
 .patient-row.is-me {
-  box-shadow: inset 0 0 0 2px #0f5f5c;
-  background: #e7f0ef;
+  box-shadow: inset 0 0 0 2px var(--accent);
+  background: var(--accent-bg);
 }
 
 .today-scroll {
@@ -60,7 +60,7 @@
   justify-content: center;
   pointer-events: none;
   font-size: 15px;
-  color: #5e584e;
+  color: var(--muted);
 }
 
 .today-shift {
@@ -92,7 +92,7 @@
   padding: 0 14px;
   border: 0;
   border-radius: 12px;
-  background: #0f5f5c;
+  background: var(--accent);
   color: #fff;
   font-size: 18px;
   font-weight: 700;
@@ -124,7 +124,7 @@
 
 .today-conditions,
 .patient-conds {
-  color: #5e584e;
+  color: var(--muted);
   font-size: 16px;
   min-width: 0;
   overflow-wrap: anywhere;
@@ -148,13 +148,13 @@
 
 .today-row:active,
 .patient-row:active {
-  background: #efe7d8;
+  background: var(--press);
 }
 
 .today .dock {
   margin: 8px -16px 0;
   flex-shrink: 0;
-  background: #f6f1e7;
+  background: var(--bg);
 }
 
 .today .dock .primary,
@@ -179,7 +179,7 @@
   width: min(430px, 100%);
   max-height: min(88vh, 760px);
   overflow: auto;
-  background: #f6f1e7;
+  background: var(--bg);
   border-radius: 22px 22px 0 0;
   padding: 10px 16px calc(20px + env(safe-area-inset-bottom));
   box-shadow: 0 -10px 28px rgba(28, 25, 21, 0.2);
@@ -191,7 +191,7 @@
   height: 5px;
   margin: 4px auto 8px;
   border-radius: 999px;
-  background: #cfc6b6;
+  background: var(--line);
 }
 
 .sheet h2 {
@@ -205,20 +205,20 @@
   margin: 18px 0 0;
   font-size: 15px;
   font-weight: 700;
-  color: #5e584e;
+  color: var(--muted);
 }
 
 .sheet-error {
   position: sticky;
   top: 0;
   z-index: 1;
-  background: #f6f1e7;
+  background: var(--bg);
 }
 
 .sheet-existing {
   margin-top: 8px;
   padding-top: 4px;
-  border-top: 1px solid #e4dccb;
+  border-top: 1px solid var(--line);
 }
 
 .patient-list,
@@ -252,8 +252,8 @@
   min-height: 56px;
   padding: 8px 16px;
   border-radius: 16px;
-  background: #fffdf8;
-  box-shadow: inset 0 0 0 1px #e4dccb;
+  background: var(--card);
+  box-shadow: inset 0 0 0 1px var(--line);
   font-size: 20px;
   cursor: pointer;
 }
@@ -262,12 +262,12 @@
   width: 28px;
   height: 28px;
   margin: 0;
-  accent-color: #0f5f5c;
+  accent-color: var(--accent);
 }
 
 .check-row:has(input:checked) {
-  background: #e7f0ef;
-  box-shadow: inset 0 0 0 2px #0f5f5c;
+  background: var(--accent-bg);
+  box-shadow: inset 0 0 0 2px var(--accent);
 }
 
 .today button,
@@ -291,9 +291,9 @@
 }
 
 .today-tab {
-  border: 1px solid #d8c9b8;
-  background: #fbf6ee;
-  color: #6b5c4c;
+  border: 1px solid var(--line);
+  background: var(--card-2);
+  color: var(--muted-2);
   border-radius: 999px;
   min-height: 44px;
   padding: 0 16px;
@@ -302,14 +302,14 @@
 }
 
 .today-tab.is-on {
-  border-color: #0f5f5c;
-  background: #0f5f5c;
+  border-color: var(--accent);
+  background: var(--accent);
   color: #fff;
 }
 
 .today-template-form {
   padding: 8px 0 12px;
-  border-bottom: 1px solid #eee2d3;
+  border-bottom: 1px solid var(--line);
 }
 
 .today-template-buttons {
@@ -332,16 +332,16 @@
 .today-search {
   width: 100%;
   min-height: 44px;
-  border: 1px solid #d8c9b8;
+  border: 1px solid var(--line);
   border-radius: 10px;
-  background: #fff;
+  background: var(--card);
   padding: 0 12px;
   font-size: 16px;
   margin-bottom: 8px;
 }
 
 .patient-last {
-  color: #6b5c4c;
+  color: var(--muted-2);
   font-size: 15px;
   white-space: nowrap;
 }
@@ -354,7 +354,7 @@
 }
 
 .today-template-row .today-gear {
-  color: #a2452c;
+  color: var(--danger);
 }
 
 .today-group {
@@ -371,18 +371,18 @@
 }
 
 .today-group-count {
-  color: #6b5c4c;
+  color: var(--muted-2);
   font-size: 15px;
 }
 
 .today-note {
-  color: #a2241c;
+  color: var(--danger-strong);
   font-size: 17px;
   font-weight: 700;
   justify-self: start;
   padding: 1px 8px;
   border-radius: 6px;
-  background: #f7ddd8;
+  background: var(--danger-bg);
   max-width: 100%;
   /* 禁忌是安全信息：允许占两行，别为了整洁截断。 */
   display: -webkit-box;
@@ -393,7 +393,7 @@
 
 /* 来过几次：从历史自动数出来，不是谁手工记的。 */
 .today-visit {
-  color: #6b5c4c;
+  color: var(--muted-2);
   font-size: 15px;
   font-weight: 700;
 }
@@ -408,8 +408,8 @@
   width: calc(100% - 24px);
   margin: 4px 12px 8px;
   border: 1px solid #c45c26;
-  background: #f7e8dd;
-  color: #8a3a1c;
+  background: var(--danger-bg);
+  color: var(--danger);
   border-radius: 10px;
   min-height: 44px;
   font-size: 15px;
@@ -424,7 +424,7 @@
 /* 实时连接断了：细条提示，重连成功自动消失。 */
 .today-offline {
   margin: 0 0 6px;
-  color: #8a3a1c;
+  color: var(--danger);
   font-size: 14px;
   font-weight: 700;
 }
@@ -432,13 +432,13 @@
 /* 别人刚改过数据：被动看一眼是谁动的，几秒自动收掉。 */
 .today-changedby {
   margin: 0 0 6px;
-  color: #5e584e;
+  color: var(--muted);
   font-size: 14px;
 }
 
 .patient-last-summary {
   margin: 2px 12px 4px;
-  color: #5e584e;
+  color: var(--muted);
   font-size: 14px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -456,7 +456,7 @@
   }
 
   body {
-    background: #fff;
+    background: var(--card);
   }
 
   .today > *:not(.print-sheet) {

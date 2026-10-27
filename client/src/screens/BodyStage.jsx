@@ -524,7 +524,15 @@ export function BodyStage({ chiefSiteId, chiefSide, items, reselecting, onSelect
     try {
       renderer = new WebGLRenderer({ antialias: true, alpha: false })
       if (!renderer.getContext()) throw new Error("webgl")
-      renderer.setClearColor(0xf3eadf, 1)
+      // 背景清色跟随深浅主题：CSS 变量进不了 WebGL，在这里换；主题变化时重画一帧。
+      const applyTheme = () => {
+        renderer.setClearColor(document.documentElement.dataset.theme === "dark" ? 0x1a1713 : 0xf3eadf, 1)
+        invalidate()
+      }
+      applyTheme()
+      const themeObserver = new MutationObserver(applyTheme)
+      themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] })
+      unlisten.push(() => themeObserver.disconnect())
       renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5))
       renderer.domElement.style.display = "block"
       renderer.domElement.style.width = "100%"

@@ -21,6 +21,19 @@ export default function App() {
   const changedByTimer = useRef(null)
   // 实时连接断了要让用的人知道（列表停在旧数据不是「没活派给我」）。
   const [live, setLive] = useState(true)
+  // 深色模式跟随系统：自动换、没有开关（昏暗的治疗室里不刺眼）。
+  const [dark, setDark] = useState(() => Boolean(window.matchMedia?.("(prefers-color-scheme: dark)").matches))
+  useEffect(() => {
+    const mq = window.matchMedia?.("(prefers-color-scheme: dark)")
+    if (!mq) return undefined
+    const apply = () => setDark(mq.matches)
+    mq.addEventListener("change", apply)
+    return () => mq.removeEventListener("change", apply)
+  }, [])
+  useEffect(() => {
+    document.documentElement.dataset.theme = dark ? "dark" : "light"
+    document.querySelector('meta[name="theme-color"]')?.setAttribute("content", dark ? "#12100d" : "#f3eadf")
+  }, [dark])
 
   async function refresh() {
     const next = await api.session()
