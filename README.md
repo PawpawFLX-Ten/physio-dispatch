@@ -115,8 +115,9 @@ npm run test:ui
 
 ## 模型和图标
 
-- 人体网格来自 BodyParts3D（© Database Center for Life Science，CC BY 4.0），原始文件在 `assets/body-source/`，页面实际加载的是 Draco 压缩版（`client/public/body/`）。重新压缩：`npm run optimize:body`，压缩后 `shared/body-assets.js` 里的版本号自动更新，用于浏览器换缓存。
-- Draco 解码器复制自 three 自带文件（`client/public/draco/`），前端离线可用。
+- 人体网格来自 BodyParts3D（© Database Center for Life Science，CC BY 4.0），原始文件在 `assets/body-source/`，页面实际加载的是 **Meshopt + 量化**（KHR_mesh_quantization）压缩版（`client/public/body/`，共约 7MB）。重新压缩：`npm run optimize:body`，压缩后 `shared/body-assets.js` 里的版本号自动更新，用于浏览器换缓存。
+- Meshopt 解码器是 three 自带的纯 JS 模块（随前端包走），不再需要 Draco 的 wasm 文件；量化后的顶点在 CPU/GPU 内存里都只占一半左右。
+- **按目标合并网格**：加载时把同一目标、同一侧的网格合成一件、共用一个材质（几何不克隆不改写，挂在带原始变换的节点下），draw call 从 346 路降到约 50 路；合不了的组自动退回单件网格，拾取语义不变。
 - PWA 图标由 `npm run icons` 用纯 Node 生成（`scripts/make-icons.mjs`），改配色去那里改。
 
 ## 今日单上的设置

@@ -16,7 +16,8 @@ import {
   WebGLRenderer,
 } from "three"
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js"
-import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js"
+import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js"
+import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js"
 import { CSS2DObject, CSS2DRenderer } from "three/examples/jsm/renderers/CSS2DRenderer.js"
 import { hasSides, targetById, TARGETS } from "@shared/catalog.js"
 import { BODY_CAMERA, BODY_FILES, meshSlug, OCCLUDED_TARGETS, resolveMesh } from "@shared/body-map.js"
@@ -47,10 +48,9 @@ const MAX_Z = 4.8
 // 每次挂载 clone 一份场景（geometry/material 是共享引用），所以绝不能 dispose 共享资源。
 const gltfCache = new Map()
 const sharedLoader = new GLTFLoader()
-const sharedDraco = new DRACOLoader()
-sharedDraco.setDecoderPath(`/draco/`)
-sharedDraco.preload()
-sharedLoader.setDRACOLoader(sharedDraco)
+// 模型用 meshopt + 量化（KHR_mesh_quantization）压的：解码器是纯 JS 随包走，
+// 不用再下 draco 的 wasm，低端机解码也快得多。
+sharedLoader.setMeshoptDecoder(MeshoptDecoder)
 
 function loadBodyFile(file) {
   const hit = gltfCache.get(file)
@@ -183,27 +183,6 @@ export function BodyStage({ chiefSiteId, chiefSide, items, reselecting, onSelect
     const pickMeshes = []
     const anchors = new Map()
 
-    function track(mesh, targetId, tissue, baseHex) {
-      const material = useMat(new MeshStandardMaterial({
-        color: baseHex,
-        roughness: 0.62,
-        metalness: 0.02,
-      }))
-      // 换掉的材质属于缓存共享件，不能 dispose；geos 也只收本实例新建的。
-      mesh.material = material
-      const box = new Box3().setFromObject(mesh)
-      const center = box.getCenter(new Vector3())
-      const side = sideOf(center, targetId)
-      mesh.userData.targetId = targetId
-      mesh.userData.side = side
-      pickMeshes.push(mesh)
-      markers.push({ id: targetId, mesh, base: baseHex, side })
-      const key = markKey(targetId, side)
-      const list = anchors.get(key) || []
-      list.push(center)
-      anchors.set(key, list)
-    }
-
     function addMarker(position, targetId, radius) {
       const geometry = new SphereGeometry(radius, 18, 14)
       geos.add(geometry)
@@ -237,28 +216,48 @@ export function BodyStage({ chiefSiteId, chiefSide, items, reselecting, onSelect
       )
       if (stopped) return
 
-      const footMeshes = []
-      const kept = []
+      // 同一目标、同一侧的网格合成一件、共用一个材质：draw call 从三百多路降到几十路，
+      // 拾取语义不变（userData 仍在）。几何一律不克隆不改写——合并件挂在带原始变换的
+      // 节点下；跨文件的件变换一致（矩阵完全相同）时并进同一件。
+      const pickGroups = new Map()
+      const contextGroups = new Map()
+      const footBoxes = []
       for (const { file, scene } of models) {
         const meshes = []
         scene.traverse((obj) => {
           if (obj.isMesh) meshes.push(obj)
         })
+        scene.updateMatrixWorld(true)
+        // 根节点带着 Y-up 旋转和 0.001 缩放，网格节点自身都是恒等（构建时已烤进根）。
+        const bakeRoot = scene.children.length === 1 ? scene.children[0].matrixWorld : null
         for (const mesh of meshes) {
           const name = mesh.userData.name || mesh.name || ""
           const decision = resolveMesh(name, file)
-          if (decision.kind === "hide") {
-            // geometry/material 与缓存共享：只摘下来，不 dispose。
-            mesh.removeFromParent()
-            continue
-          }
-          kept.push(mesh)
-          mesh.userData.part = decision
-          if (FOOT.test(meshSlug(name))) footMeshes.push(mesh)
-          mesh.castShadow = false
-          mesh.receiveShadow = false
+          if (decision.kind === "hide") continue
+          const box = new Box3().setFromObject(mesh)
+          if (FOOT.test(meshSlug(name))) footBoxes.push(box.clone())
+          const matrix = bakeRoot && mesh.matrixWorld.equals(bakeRoot) ? bakeRoot : mesh.matrixWorld.clone()
+          const matrixKey = matrix.elements.join(",")
+          const map = decision.kind === "pick" ? pickGroups : contextGroups
+          const side = decision.kind === "pick" ? sideOf(box.getCenter(new Vector3()), decision.targetId) : null
+          const groupKey =
+            decision.kind === "pick"
+              ? `${decision.targetId}|${decision.tissue}|${side || "mid"}`
+              : decision.tissue
+          const group =
+            map.get(groupKey) || {
+              targetId: decision.kind === "pick" ? decision.targetId : null,
+              tissue: decision.tissue,
+              side,
+              buckets: new Map(),
+              boxes: [],
+            }
+          const bucket = group.buckets.get(matrixKey) || { matrix, geometries: [] }
+          bucket.geometries.push(mesh.geometry)
+          group.buckets.set(matrixKey, bucket)
+          group.boxes.push(box)
+          map.set(groupKey, group)
         }
-        content.add(scene)
       }
 
       figure.add(rig)
@@ -278,39 +277,49 @@ export function BodyStage({ chiefSiteId, chiefSide, items, reselecting, onSelect
 
       const boneMat = useMat(new MeshStandardMaterial({ color: BONE, roughness: 0.72, metalness: 0.02 }))
       const muscleMat = useMat(new MeshStandardMaterial({ color: MUSCLE, roughness: 0.58, metalness: 0.02 }))
-      for (const mesh of kept) {
-        const decision = mesh.userData.part
-        if (decision.kind === "pick") {
-          track(mesh, decision.targetId, decision.tissue, restingColor(decision.targetId, decision.tissue))
-          continue
-        }
-        mesh.material = decision.tissue === "muscle" ? muscleMat : boneMat
-      }
 
-      const sideBoxes = (meshes) => {
-        const sides = { left: new Box3(), right: new Box3() }
-        let leftCount = 0
-        let rightCount = 0
-        for (const mesh of meshes) {
-          const box = new Box3().setFromObject(mesh)
-          if (box.isEmpty()) continue
-          const center = box.getCenter(new Vector3())
-          if (center.x >= 0) {
-            sides.right.union(box)
-            rightCount += 1
-          } else {
-            sides.left.union(box)
-            leftCount += 1
+      // 一个组（目标×侧别，或上下文×组织）进一个材质；材质进 markers 供上色/透视用。
+      function mountGroup(group, material, base) {
+        for (const bucket of group.buckets.values()) {
+          const merged = bucket.geometries.length > 1 ? mergeGeometries(bucket.geometries, false) : null
+          // 合不了（属性不一致）就退回单件网格：少省点 draw call，行为不比不合并差。
+          const pieces = merged ? [merged] : bucket.geometries
+          if (merged) geos.add(merged)
+          for (const geometry of pieces) {
+            const mesh = new Mesh(geometry, material)
+            mesh.userData.targetId = group.targetId
+            mesh.userData.side = group.side
+            const holder = new Group()
+            holder.matrixAutoUpdate = false
+            holder.matrix.copy(bucket.matrix)
+            holder.add(mesh)
+            content.add(holder)
+            if (group.targetId) pickMeshes.push(mesh)
           }
         }
-        return [
-          leftCount ? sides.left : null,
-          rightCount ? sides.right : null,
-        ].filter(Boolean)
+        if (!group.targetId) return
+        markers.push({ id: group.targetId, material, base, side: group.side })
+        const list = anchors.get(markKey(group.targetId, group.side)) || []
+        for (const box of group.boxes) list.push(box.getCenter(new Vector3()))
+        anchors.set(markKey(group.targetId, group.side), list)
       }
 
-      const byTarget = (id) => kept.filter((mesh) => mesh.userData.targetId === id)
-      for (const box of sideBoxes(byTarget("gastroc"))) {
+      for (const group of contextGroups.values()) {
+        mountGroup(group, group.tissue === "bone" ? boneMat : muscleMat, null)
+      }
+      for (const group of pickGroups.values()) {
+        const base = restingColor(group.targetId, group.tissue)
+        mountGroup(group, useMat(new MeshStandardMaterial({ color: base, roughness: 0.62, metalness: 0.02 })), base)
+      }
+
+      const groupsOf = (id) => [...pickGroups.values()].filter((group) => group.targetId === id)
+      const unionBox = (boxes) => {
+        const box = new Box3()
+        for (const part of boxes) box.union(part)
+        return box
+      }
+      for (const group of groupsOf("gastroc")) {
+        const box = unionBox(group.boxes)
         const point = new Vector3()
         box.getCenter(point)
         // 承山贴在腓肠肌下段外侧、再往后挪一点，避免挡在比目鱼肌中心射线上。
@@ -321,35 +330,43 @@ export function BodyStage({ chiefSiteId, chiefSide, items, reselecting, onSelect
         const marker = addMarker(point, "chengshan", 0.014)
         figure.add(marker.mesh)
         pickMeshes.push(marker.mesh)
-        markers.push({ id: "chengshan", mesh: marker.mesh, base: marker.base, side: marker.side })
+        markers.push({ id: "chengshan", material: marker.mesh.material, base: marker.base, side: marker.side })
         const list = anchors.get(markKey("chengshan", marker.side)) || []
         list.push(point.clone())
         anchors.set(markKey("chengshan", marker.side), list)
       }
-      for (const box of sideBoxes(byTarget("quad"))) {
+      for (const group of groupsOf("quad")) {
+        const box = unionBox(group.boxes)
         const point = box.getCenter(new Vector3())
         point.x = point.x >= 0 ? box.max.x + 0.02 : box.min.x - 0.02
         const marker = addMarker(point, "itband", 0.028)
         figure.add(marker.mesh)
         pickMeshes.push(marker.mesh)
-        markers.push({ id: "itband", mesh: marker.mesh, base: marker.base, side: marker.side })
+        markers.push({ id: "itband", material: marker.mesh.material, base: marker.base, side: marker.side })
         const list = anchors.get(markKey("itband", marker.side)) || []
         list.push(point.clone())
         anchors.set(markKey("itband", marker.side), list)
       }
-      for (const box of sideBoxes(footMeshes)) {
+      const footBySide = new Map()
+      for (const box of footBoxes) {
+        const side = box.getCenter(new Vector3()).x >= 0 ? "right" : "left"
+        const union = footBySide.get(side) || new Box3()
+        union.union(box)
+        footBySide.set(side, union)
+      }
+      for (const box of footBySide.values()) {
         const point = box.getCenter(new Vector3())
         point.y = box.min.y + 0.02
         const marker = addMarker(point, "plantar", 0.03)
         figure.add(marker.mesh)
         pickMeshes.push(marker.mesh)
-        markers.push({ id: "plantar", mesh: marker.mesh, base: marker.base, side: marker.side })
+        markers.push({ id: "plantar", material: marker.mesh.material, base: marker.base, side: marker.side })
         const list = anchors.get(markKey("plantar", marker.side)) || []
         list.push(point.clone())
         anchors.set(markKey("plantar", marker.side), list)
       }
-      for (const mesh of byTarget("knee")) {
-        const point = new Box3().setFromObject(mesh).getCenter(new Vector3())
+      for (const group of groupsOf("knee")) {
+        const point = unionBox(group.boxes).getCenter(new Vector3())
         const geometry = new SphereGeometry(0.055, 16, 12)
         geos.add(geometry)
         const material = useMat(new MeshStandardMaterial({
@@ -365,7 +382,7 @@ export function BodyStage({ chiefSiteId, chiefSide, items, reselecting, onSelect
         helper.userData.side = side
         figure.add(helper)
         pickMeshes.push(helper)
-        markers.push({ id: "knee", mesh: helper, base: restingColor("knee", "bone"), side })
+        markers.push({ id: "knee", material, base: restingColor("knee", "bone"), side })
         const list = anchors.get(markKey("knee", side)) || []
         list.push(point.clone())
         anchors.set(markKey("knee", side), list)
@@ -396,7 +413,7 @@ export function BodyStage({ chiefSiteId, chiefSide, items, reselecting, onSelect
         })
         for (const entry of markers) {
           const role = resolvePaintRole(entry.id, entry.side, state)
-          entry.mesh.material.color.setHex(hexForRole(role, entry.base))
+          entry.material.color.setHex(hexForRole(role, entry.base))
           const order = ordersFor(entry.id, entry.side, state)
           const label = labelAnchors.get(markKey(entry.id, entry.side))
           if (!label) continue
@@ -420,7 +437,7 @@ export function BodyStage({ chiefSiteId, chiefSide, items, reselecting, onSelect
           material.opacity = faint ? 0.12 : 1
           material.depthWrite = !faint
         }
-        for (const entry of markers) dim(entry.mesh.material, markedIds.has(entry.id))
+        for (const entry of markers) dim(entry.material, markedIds.has(entry.id))
         dim(boneMat, false)
         dim(muscleMat, false)
         invalidate()

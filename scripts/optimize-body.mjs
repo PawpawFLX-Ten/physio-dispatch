@@ -1,18 +1,21 @@
-// 把 client/public/body 里的 BodyParts3D 网格用 Draco 压小。
+// 把 client/public/body 里的 BodyParts3D 网格用 Meshopt + 量化（KHR_mesh_quantization）压小。
 // 原始文件搬去 assets/body-source，压缩结果放回 public/body。
 // 用法：npm run optimize:body
 // 注：不走 @gltf-transform/cli——它的大文件在 ntfs3 挂载上加载会 SIGBUS，这里用底层 API。
+// 之前用过 Draco：解码要下 286KB wasm、低端机全量解码 1-3 秒，且一开顶点量化 Firefox
+// 的 wasm 解码就挂起。Meshopt 解码器是纯 JS（随前端包走）、解码快数倍，量化由 three
+// 原生支持，绕开了那两类问题。
 import fs from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { NodeIO } from "@gltf-transform/core"
-import { KHRDracoMeshCompression } from "@gltf-transform/extensions"
-import draco3d from "draco3dgltf"
+import { EXTMeshoptCompression, KHRMeshQuantization } from "@gltf-transform/extensions"
+import { meshopt } from "@gltf-transform/functions"
+import { MeshoptEncoder } from "meshoptimizer"
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const bodyDir = path.join(root, "client", "public", "body")
 const sourceDir = path.join(root, "assets", "body-source")
-const dracoTarget = path.join(root, "client", "public", "draco")
 const versionFile = path.join(root, "shared", "body-assets.js")
 
 function fail(message) {
@@ -40,10 +43,12 @@ function glbNames(file) {
 
 fs.mkdirSync(sourceDir, { recursive: true })
 
+// 依赖要的是模块本身（ready 只是预热用的 Promise，不是实例）。
+await MeshoptEncoder.ready
 const io = new NodeIO()
-  .registerExtensions([KHRDracoMeshCompression])
+  .registerExtensions([EXTMeshoptCompression, KHRMeshQuantization])
   .registerDependencies({
-    "draco3d.encoder": await draco3d.createEncoderModule(),
+    "meshopt.encoder": MeshoptEncoder,
   })
 
 const files = fs.readdirSync(bodyDir).filter((name) => name.endsWith(".glb")).sort()
@@ -69,17 +74,8 @@ for (const name of files) {
   beforeBytes += beforeSize
 
   const doc = await io.read(sourceFile)
-  doc
-    .createExtension(KHRDracoMeshCompression)
-    .setRequired(true)
-    .setEncoderOptions({
-      method: KHRDracoMeshCompression.EncoderMethod.EDGEBREAKER,
-      encodeSpeed: 5,
-      decodeSpeed: 5,
-      // 试过 quantizationBits: { POSITION: 11, NORMAL: 8 }，体积 -23%，但 Firefox 的
-      // Draco WASM 解码会挂起（Node 解码正常、无报错，进度停在 0/13）。在真机上
-      // 验证清楚之前不要开启量化。
-    })
+  // meshopt() 一趟做完：顶点重排 + 量化（默认 POSITION 14 位 / NORMAL 10 位）+ EXT_meshopt_compression。
+  await doc.transform(meshopt({ encoder: MeshoptEncoder, level: "high" }))
   await io.write(tmpFile, doc)
 
   const namesAfter = glbNames(tmpFile)
@@ -97,16 +93,6 @@ for (const name of files) {
   fs.renameSync(tmpFile, publicFile)
   afterBytes += afterSize
   console.log(`${name} ${Math.round(beforeSize / 1024)}KB -> ${Math.round(afterSize / 1024)}KB（名字 ${namesAfter.size}/${namesBefore.size}）`)
-}
-
-// three 自带 Draco 解码器，复制一份给前端用，不依赖网络。
-fs.rmSync(dracoTarget, { recursive: true, force: true })
-fs.mkdirSync(dracoTarget, { recursive: true })
-const decoderSrc = path.join(root, "node_modules", "three", "examples", "jsm", "libs", "draco")
-for (const name of fs.readdirSync(decoderSrc)) {
-  if (!name.startsWith("draco_decoder") && !name.startsWith("draco_wasm_wrapper")) continue
-  fs.copyFileSync(path.join(decoderSrc, name), path.join(dracoTarget, name))
-  console.log(`draco/${name} 已复制`)
 }
 
 // 模型内容变了，版本号跟着变，浏览器才会扔掉旧缓存。

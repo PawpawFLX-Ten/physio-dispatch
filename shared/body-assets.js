@@ -1,2 +1,2 @@
 // 由 npm run optimize:body 生成，模型一换这里就变。
-export const BODY_VERSION = "202610080642"
+export const BODY_VERSION = "202610270357"

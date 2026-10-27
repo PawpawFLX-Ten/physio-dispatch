@@ -187,7 +187,7 @@ if (fs.existsSync(path.join(dist, "index.html"))) {
     express.static(dist, {
       setHeaders(res, filePath) {
         const rel = path.relative(dist, filePath)
-        if (/^(?:body|draco|icons|assets)[\\/]/.test(rel)) {
+        if (/^(?:body|icons|assets)[\\/]/.test(rel)) {
           // 模型和图标换版本时文件名/参数会变，可以放心长缓存
           res.setHeader("Cache-Control", "public, max-age=31536000, immutable")
         } else if (/(?:^|[\\/])sw\.js$/.test(rel) || /(?:^|[\\/])index\.html$/.test(rel) || /(?:^|[\\/])manifest\.webmanifest$/.test(rel)) {
