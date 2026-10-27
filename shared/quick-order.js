@@ -1,5 +1,5 @@
 // 「说一句」快速开单的解析器。
-// 词表是封闭的（41 个目标 + 同义词、4 个手法、4 个方向、左右双、数字），
+// 词表是封闭的（42 个目标 + 同义词、4 个手法、4 个方向、左右双、数字），
 // 规则匹配就够，不需要模型：主治说一遍，助手打字或用键盘语音输入，直接变成清单。
 import { allowsChief, clampDose, hasSides, targetById } from "./catalog.js"
 
@@ -17,7 +17,8 @@ const TARGET_ALIASES = [
   ["小腿三头肌", "gastroc"],
   ["股四头肌", "quad"], ["股四头", "quad"], ["大腿前侧", "quad"], ["大腿前", "quad"],
   ["骨四头肌", "quad"], ["骨四头", "quad"], ["故四头", "quad"],
-  ["臀", "glute"], ["屁股", "glute"],
+  ["臀", "glute"], ["屁股", "glute"], ["臀肌群", "glute"],
+  ["臀中肌", "glute-med"], ["臀中", "glute-med"],
   ["比目鱼肌", "soleus"], ["比目鱼", "soleus"],
   ["腓肠肌", "gastroc"], ["腓肠", "gastroc"], ["小腿肚", "gastroc"],
   ["肥肠肌", "gastroc"], ["肥肠", "gastroc"],

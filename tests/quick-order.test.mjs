@@ -153,6 +153,13 @@ test("stretch parses as its own technique instead of silently becoming massage",
   assert.equal(parseQuickOrder("腘绳肌拉一拉，比目鱼肌").items[1].technique, "stretch")
 })
 
+test("gluteus medius is its own target, not folded into the glute group", () => {
+  assert.equal(parseQuickOrder("左臀中肌松解").items[0].targetId, "glute-med")
+  assert.equal(parseQuickOrder("臀中肌拉伸十分钟").items[0].targetId, "glute-med")
+  // 说「臀」还是整个臀肌群。
+  assert.equal(parseQuickOrder("臀松松").items[0].targetId, "glute")
+})
+
 test("connective words do not pollute unknown list", () => {
   const parsed = parseQuickOrder("冈上肌还有冈下肌，以及斜方肌顺便松一下")
   assert.equal(parsed.items.length, 3)

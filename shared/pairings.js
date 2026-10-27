@@ -6,10 +6,13 @@ import { allowsWork, targetById } from "./catalog.js"
 export const CHIEF_SITES = ["knee", "lumbar", "neck", "shoulder"]
 
 export const DEFAULT_PAIRINGS = {
-  knee: ["quad", "hamstring", "itband", "soleus", "gastroc"],
+  // 膝：按髌股痛指南补髋周（臀肌群+臀中肌），不再只有大腿前后侧。
+  knee: ["quad", "hamstring", "glute", "glute-med", "itband", "soleus", "gastroc"],
   lumbar: ["glute", "erector-spinae", "iliopsoas", "piriformis", "hamstring"],
-  neck: ["trapezius", "levator-scap", "rhomboid", "scm"],
-  shoulder: ["supraspinatus", "infraspinatus", "subscapularis", "teres-minor", "trapezius", "pectoralis-major"],
+  // 颈：去掉胸锁乳突肌（老年人颈动脉窦区按压有晕厥风险，要做得单独点名，不进默认）。
+  neck: ["trapezius", "levator-scap", "rhomboid"],
+  // 肩：补前锯肌（肩胛控制是肩袖指南要点）。
+  shoulder: ["supraspinatus", "infraspinatus", "subscapularis", "teres-minor", "serratus", "trapezius", "pectoralis-major"],
 }
 
 // 读侧：没编辑过的部位用默认，编辑过的用存下的；顺手滤掉目录里已不存在的靶点。

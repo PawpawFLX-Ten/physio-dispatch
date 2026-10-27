@@ -19,7 +19,9 @@ export const TARGETS = [
   { id: "shoulder", name: "肩", kind: "both", x: -0.34, y: 1.32, z: 0.02 },
   { id: "hamstring", name: "腘绳肌", kind: "muscle", x: -0.16, y: 0.7, z: -0.12 },
   { id: "quad", name: "股四头肌", kind: "muscle", x: 0.18, y: 0.72, z: 0.12 },
-  { id: "glute", name: "臀", kind: "muscle", x: 0.02, y: 0.9, z: -0.16 },
+  { id: "glute", name: "臀肌群", kind: "muscle", x: 0.02, y: 0.9, z: -0.16 },
+  // 臀中肌单独立项：膝骨关节炎/髌股痛的指南都强调髋外展肌（JOSPT），不能只按「臀」打包。
+  { id: "glute-med", name: "臀中肌", kind: "muscle" },
   { id: "soleus", name: "比目鱼肌", kind: "muscle", x: -0.16, y: 0.26, z: -0.08 },
   { id: "gastroc", name: "腓肠肌", kind: "muscle", x: 0.16, y: 0.3, z: -0.1 },
   { id: "plantar", name: "足底", kind: "node", x: 0.02, y: 0.05, z: 0.04 },
@@ -28,10 +30,11 @@ export const TARGETS = [
   // 大腿与髋
   { id: "adductors", name: "内收肌群", kind: "muscle" },
   { id: "sartorius", name: "缝匠肌", kind: "muscle" },
-  { id: "popliteus", name: "腘肌", kind: "muscle" },
   { id: "iliopsoas", name: "髂腰肌", kind: "muscle" },
+  // 梨状肌属臀区深群，贴着坐骨神经：深压前先看备注。
   { id: "piriformis", name: "梨状肌", kind: "muscle" },
-  // 小腿与足
+  // 小腿与足（腘肌是小腿后群深层，归这儿不归大腿）
+  { id: "popliteus", name: "腘肌", kind: "muscle" },
   { id: "tib-anterior", name: "胫骨前肌", kind: "muscle" },
   { id: "tib-posterior", name: "胫骨后肌", kind: "muscle" },
   { id: "fibularis", name: "腓骨肌", kind: "muscle" },

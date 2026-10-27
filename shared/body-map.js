@@ -47,7 +47,8 @@ const TARGET_BY_SLUG = {
   semimembranosus: "hamstring",
   quadriceps: "quad",
   "gluteus-maximus": "glute",
-  "gluteus-medius": "glute",
+  // 臀中肌有自己的下手项；臀大/臀小仍归「臀肌群」。
+  "gluteus-medius": "glute-med",
   "gluteus-minimus": "glute",
   soleus: "soleus",
   gastrocnemius: "gastroc",
