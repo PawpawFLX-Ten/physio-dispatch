@@ -11,7 +11,7 @@ import "./today.css"
 const PULL_LIMIT = 88
 const PULL_ARM = 64
 
-export function Today({ snap, live, onRefresh, onSnap, onOpen }) {
+export function Today({ snap, live, changedBy, onRefresh, onSnap, onOpen }) {
   const today = snap.today || []
   const patients = snap.patients || []
   const activePatients = useMemo(() => patients.filter((patient) => !patient.archived), [patients])
@@ -184,7 +184,7 @@ export function Today({ snap, live, onRefresh, onSnap, onOpen }) {
 
   // 有新活派给自己就震一下（第一次加载不震）。单人治疗室所有项都算自己的，
   // 自己刚加的项不该震，只有多人才提醒。
-  const multi = (snap.staff?.length || 0) > 1
+  const multi = snap.solo !== true
   useEffect(() => {
     if (!multi) {
       prevMineCount.current = null
@@ -342,6 +342,7 @@ export function Today({ snap, live, onRefresh, onSnap, onOpen }) {
         {live === false ? (
           <p className="today-offline" role="status">连接断了，正在重连…恢复后自动刷新</p>
         ) : null}
+        {changedBy ? <p className="today-changedby" role="status">{`${changedBy} 刚改过，已更新`}</p> : null}
         {/* 名单只有一个人时收起派工标签：没有「派给我的」「按人」，整栏都不要。 */}
         {(snap.staff?.length || 0) > 1 ? (
           <div className="today-tabs" role="tablist">

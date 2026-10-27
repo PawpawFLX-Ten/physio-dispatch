@@ -77,6 +77,18 @@ export function defaultDose(technique) {
   return { minutes: 8 }
 }
 
+// 剂量钳制：说一句解析和服务端入库共用这一份，缺省给默认、至少为 1。
+// （patchItem 的部分补丁语义不同——没提到的键要保留原值——那边单独写。）
+export function clampDose(technique, dose) {
+  if (technique === "equipment") {
+    return {
+      sets: Math.max(1, Number(dose?.sets) || 3),
+      reps: Math.max(1, Number(dose?.reps) || 10),
+    }
+  }
+  return { minutes: Math.max(1, Number(dose?.minutes) || 8) }
+}
+
 export function techniqueLabel(id) {
   return TECHNIQUES.find((item) => item.id === id)?.label || id
 }

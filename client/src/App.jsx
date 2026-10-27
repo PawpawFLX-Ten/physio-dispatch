@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from "react"
+import { lazy, Suspense, useEffect, useRef, useState } from "react"
 import { api, getDeviceId } from "./api.js"
 import { parseChangeEvent } from "@shared/events.js"
 import { Gate } from "./screens/Gate.jsx"
@@ -16,6 +16,9 @@ export default function App() {
   const [entryInitial, setEntryInitial] = useState(null)
   const [error, setError] = useState("")
   const [pulse, setPulse] = useState(0)
+  // 别人刚改过数据的名字：被动提示几秒就收，不用任何人点。
+  const [changedBy, setChangedBy] = useState("")
+  const changedByTimer = useRef(null)
   // 实时连接断了要让用的人知道（列表停在旧数据不是「没活派给我」）。
   const [live, setLive] = useState(true)
 
@@ -82,6 +85,11 @@ export default function App() {
       // 自己改的数据服务器会带上 origin，应用返回值时已经拿到了最新状态，不用再拉一遍。
       const payload = parseChangeEvent(event.data)
       if (payload?.origin && payload.origin === getDeviceId()) return
+      if (payload?.by) {
+        setChangedBy(payload.by)
+        clearTimeout(changedByTimer.current)
+        changedByTimer.current = setTimeout(() => setChangedBy(""), 4000)
+      }
       clearTimeout(debounce)
       debounce = setTimeout(() => setPulse((n) => n + 1), 400)
     }
@@ -96,6 +104,7 @@ export default function App() {
     }
     return () => {
       clearTimeout(debounce)
+      clearTimeout(changedByTimer.current)
       source.close()
     }
   }, [])
@@ -154,7 +163,7 @@ export default function App() {
       </Suspense>
     )
   }
-  return <Today snap={snap} live={live} onRefresh={refresh} onSnap={applySnap} onOpen={(id, initial) => {
+  return <Today snap={snap} live={live} changedBy={changedBy} onRefresh={refresh} onSnap={applySnap} onOpen={(id, initial) => {
     setEntryId(id)
     setEntryInitial(initial || null)
   }} />

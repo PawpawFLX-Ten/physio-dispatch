@@ -3,6 +3,7 @@ import {
   DIRECTIONS,
   TECHNIQUES,
   allowsChief,
+  clampDose,
   defaultDose,
   targetById,
   targetTitle,
@@ -196,10 +197,7 @@ export const entryMethods = {
       if (!entry.chiefSiteId) fail(400, "请先点要治的地方，再加下手项")
       if (!TECHNIQUES.some((row) => row.id === item.technique)) fail(400, "手法不对")
       if (!DIRECTIONS.some((row) => row.id === item.direction)) fail(400, "方向不对")
-      const dose =
-        item.technique === "equipment"
-          ? { sets: Math.max(1, Number(item.dose?.sets) || 3), reps: Math.max(1, Number(item.dose?.reps) || 10) }
-          : { minutes: Math.max(1, Number(item.dose?.minutes) || 8) }
+      const dose = clampDose(item.technique, item.dose)
       entry.items.push({
         id: id(),
         conditionId: focus,

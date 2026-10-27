@@ -150,8 +150,11 @@ setInterval(() => {
 let sseSeq = 0
 store.subscribe(() => {
   sseSeq += 1
-  // origin 是改数据那台手机的 deviceId：自己的改动自己已经拿到返回值，不用再拉。
-  const payload = `data: ${JSON.stringify(changeEvent(sseSeq, currentOrigin))}\n\n`
+  // origin 是改数据那台手机的 deviceId：自己的改动自己已经拿到返回值，不用再拉；
+  // by 带上那个人的名字，别的手机能被动看到「谁刚动过」。
+  const whoId = store.device(currentOrigin)
+  const by = store.state.staff.find((person) => person.id === whoId)?.name || ""
+  const payload = `data: ${JSON.stringify(changeEvent(sseSeq, currentOrigin, by))}\n\n`
   for (const res of sseClients) {
     try {
       res.write(payload)

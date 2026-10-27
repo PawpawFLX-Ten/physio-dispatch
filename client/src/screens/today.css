@@ -429,6 +429,13 @@
   font-weight: 700;
 }
 
+/* 别人刚改过数据：被动看一眼是谁动的，几秒自动收掉。 */
+.today-changedby {
+  margin: 0 0 6px;
+  color: #5e584e;
+  font-size: 14px;
+}
+
 .patient-last-summary {
   margin: 2px 12px 4px;
   color: #5e584e;

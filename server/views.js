@@ -16,6 +16,8 @@ export const viewMethods = {
     if (base.stage !== "ready") return base
     return {
       ...base,
+      // 单人治疗室的界面差异（收起派工、行内完成口径）以服务端这份为准，别三处各算各的。
+      solo: this.state.staff.length === 1,
       today: this.todayList(meId),
       todayByStaff: this.todayByStaff(),
       patients: this.patientList(),

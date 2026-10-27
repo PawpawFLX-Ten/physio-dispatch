@@ -176,6 +176,8 @@ export const ioMethods = {
   },
 
   // 写穿到磁盘：文件内容和目录项都 fsync，掉电后 clinic.json 不会变空。
+  // 单行紧凑 JSON：数据按年增长（每天 20 单约 20-35MB/年），缩进排版会让每次
+  // 保存都白写近一倍的字节，读侧 JSON.parse 不在乎格式。
   save() {
     this.backup()
     const dir = path.dirname(this.file)
@@ -183,7 +185,7 @@ export const ioMethods = {
     const tmp = `${this.file}.tmp`
     const fd = fs.openSync(tmp, "w")
     try {
-      fs.writeFileSync(fd, JSON.stringify(this.state, null, 2))
+      fs.writeFileSync(fd, JSON.stringify(this.state))
       fs.fsyncSync(fd)
     } finally {
       fs.closeSync(fd)

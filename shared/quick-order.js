@@ -1,7 +1,7 @@
 // 「说一句」快速开单的解析器。
 // 词表是封闭的（41 个目标 + 同义词、4 个手法、4 个方向、左右双、数字），
 // 规则匹配就够，不需要模型：主治说一遍，助手打字或用键盘语音输入，直接变成清单。
-import { allowsChief, hasSides, targetById } from "./catalog.js"
+import { allowsChief, clampDose, hasSides, targetById } from "./catalog.js"
 
 const TARGET_ALIASES = [
   ["膝盖", "knee"], ["膝关节", "knee"], ["膝", "knee"],
@@ -194,13 +194,7 @@ export function parseQuickOrder(text) {
 }
 
 function doseFor(sticky) {
-  if (sticky.technique === "equipment") {
-    return {
-      sets: Math.max(1, sticky.dose.sets || 3),
-      reps: Math.max(1, sticky.dose.reps || 10),
-    }
-  }
-  return { minutes: Math.max(1, sticky.dose.minutes || 8) }
+  return clampDose(sticky.technique, sticky.dose)
 }
 
 function mergeDose(sticky, dose) {
