@@ -129,7 +129,7 @@ export function BodyStage({ chiefSiteId, chiefSide, items, reselecting, onSelect
       dirty = true
     }
 
-    function useMat(material) {
+    function trackMaterial(material) {
       mats.add(material)
       return material
     }
@@ -194,7 +194,7 @@ export function BodyStage({ chiefSiteId, chiefSide, items, reselecting, onSelect
       const geometry = new SphereGeometry(radius, 18, 14)
       geos.add(geometry)
       const base = restingColor(targetId, "node")
-      const material = useMat(new MeshStandardMaterial({
+      const material = trackMaterial(new MeshStandardMaterial({
         color: base,
         roughness: 0.45,
         metalness: 0.02,
@@ -267,8 +267,8 @@ export function BodyStage({ chiefSiteId, chiefSide, items, reselecting, onSelect
         }
       }
 
-      const boneMat = useMat(new MeshStandardMaterial({ color: BONE, roughness: 0.72, metalness: 0.02 }))
-      const muscleMat = useMat(new MeshStandardMaterial({ color: MUSCLE, roughness: 0.58, metalness: 0.02 }))
+      const boneMat = trackMaterial(new MeshStandardMaterial({ color: BONE, roughness: 0.72, metalness: 0.02 }))
+      const muscleMat = trackMaterial(new MeshStandardMaterial({ color: MUSCLE, roughness: 0.58, metalness: 0.02 }))
       let contextMeshCount = 0
 
       // 一组（目标×侧别，或上下文×组织）一个 BatchedMesh：一组一次 draw call。
@@ -316,7 +316,7 @@ export function BodyStage({ chiefSiteId, chiefSide, items, reselecting, onSelect
       }
       for (const group of pickGroups.values()) {
         const base = restingColor(group.targetId, group.tissue)
-        mountGroup(group, useMat(new MeshStandardMaterial({ color: base, roughness: 0.62, metalness: 0.02 })), base)
+        mountGroup(group, trackMaterial(new MeshStandardMaterial({ color: base, roughness: 0.62, metalness: 0.02 })), base)
       }
 
       // 量体归一化必须在挂载之后：量一个空的 content 会把 rig.position 算成 NaN，
@@ -414,7 +414,7 @@ export function BodyStage({ chiefSiteId, chiefSide, items, reselecting, onSelect
         const point = unionBox(group.boxes).getCenter(new Vector3())
         const geometry = new SphereGeometry(0.055, 16, 12)
         geos.add(geometry)
-        const material = useMat(new MeshStandardMaterial({
+        const material = trackMaterial(new MeshStandardMaterial({
           color: CHIEF,
           transparent: true,
           opacity: 0,

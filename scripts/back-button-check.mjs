@@ -1,7 +1,7 @@
 // 返回键分层的行为验证：需要 dev 环境（vite 5173 + api 8787）和 BiDi 浏览器：
 //   node scripts/back-button-check.mjs
 // 环境要求与 ui-e2e.mjs 相同：BIDI=ws://127.0.0.1:9222/session，数据目录可重复跑。
-import fs from "node:fs"
+
 
 const wsUrl = process.env.BIDI || "ws://127.0.0.1:9222/session"
 const base = process.env.APP || "http://127.0.0.1:5173"

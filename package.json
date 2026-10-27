@@ -11,7 +11,8 @@
     "test:ui": "node scripts/ui-e2e.mjs",
     "start:clinic": "bash scripts/start-clinic.sh",
     "optimize:body": "node scripts/optimize-body.mjs",
-    "icons": "node scripts/make-icons.mjs"
+    "icons": "node scripts/make-icons.mjs",
+    "lint": "eslint ."
   },
   "dependencies": {
     "compression": "^1.8.2",
@@ -27,6 +28,9 @@
     "@gltf-transform/functions": "^4.5.1",
     "@vitejs/plugin-react": "^4.3.4",
     "draco3dgltf": "^1.5.7",
+    "eslint": "^9.39.5",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^5.2.0",
     "meshoptimizer": "^1.3.0",
     "playwright-core": "^1.49.1",
     "tiny-pinyin": "^1.3.2",

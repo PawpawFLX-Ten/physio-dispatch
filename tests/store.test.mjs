@@ -1018,7 +1018,6 @@ test("entry version bumps; stale reorder loses to a completed item", () => {
   store.addItem({ deviceId: "doc", entryId, targetId: "soleus" })
   // 旧数据没有 version 时按 0 兼容
   delete store.entryById(entryId).version
-  const entry = store.entryById(entryId)
   assert.equal(created.entry.version ?? 0, 0)
 
   const aide = store.state.staff.find((person) => person.name === "小李")
