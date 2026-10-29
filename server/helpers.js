@@ -1,6 +1,13 @@
 // 数据层的纯函数和公共小工具：不碰 this、不碰文件。
 import crypto from "node:crypto"
-import { DIRECTIONS, TECHNIQUES, defaultDose } from "../shared/catalog.js"
+import { DIRECTIONS, TECHNIQUES, clampDose } from "../shared/catalog.js"
+import {
+  equipmentTypeById,
+  equipmentUnitById,
+  exerciseTemplateById,
+  sanitizeEquipmentParameters,
+  sanitizeLinkedTargets,
+} from "../shared/equipment.js"
 import { sanitizePairings } from "../shared/pairings.js"
 
 export function id() {
@@ -36,14 +43,70 @@ export function normalizeSide(side) {
   return null
 }
 
+// 新设备字段进入工作签名：离开病人页时才能判断器械/参数/关联目标是否改过。
+// 参数对象按 key 排序，避免只是对象插入顺序不同就误报“偏离病症”。
 export function workSignature(item) {
+  const parameters =
+    item.parameters && typeof item.parameters === "object" && !Array.isArray(item.parameters)
+      ? Object.fromEntries(Object.keys(item.parameters).sort().map((key) => [key, item.parameters[key]]))
+      : {}
   return JSON.stringify({
     targetId: item.targetId,
     side: item.side || null,
     technique: item.technique,
     direction: item.direction,
     dose: item.dose,
+    equipmentTypeId: item.equipmentTypeId || null,
+    equipmentUnitId: item.equipmentUnitId || null,
+    exerciseTemplateId: item.exerciseTemplateId || null,
+    parameters,
+    linkedTargets: sanitizeLinkedTargets(item.linkedTargets, { strictSide: false }),
   })
+}
+
+// 导入/读盘共用的器械字段形状：非法类型/机台/模板降级为空，不丢掉整条旧任务。
+function sanitizeItemEquipment(item, technique) {
+  if (technique !== "equipment") {
+    return {
+      equipmentTypeId: null,
+      equipmentUnitId: null,
+      exerciseTemplateId: null,
+      parameters: {},
+      linkedTargets: [],
+    }
+  }
+  let type = equipmentTypeById(item.equipmentTypeId)
+  let template = exerciseTemplateById(item.exerciseTemplateId)
+  if (template) {
+    if (!type) type = equipmentTypeById(template.equipmentTypeId)
+    else if (type.id !== template.equipmentTypeId) template = null
+  }
+  let unit = equipmentUnitById(item.equipmentUnitId)
+  if (!type && unit) type = equipmentTypeById(unit.equipmentTypeId)
+  if (unit && (!type || !type.requiresUnit || unit.equipmentTypeId !== type.id)) unit = null
+  let linkedTargets = sanitizeLinkedTargets(item.linkedTargets, { strictSide: false })
+  if (template) {
+    linkedTargets = linkedTargets.filter((link) => template.compatibleTargetIds.includes(link.targetId))
+  }
+  return {
+    equipmentTypeId: type?.id || null,
+    equipmentUnitId: type?.requiresUnit ? unit?.id || null : null,
+    exerciseTemplateId: template?.id || null,
+    parameters: sanitizeEquipmentParameters(type?.id || null, item.parameters),
+    linkedTargets,
+  }
+}
+
+// 病症档案项与今日项共用这层清洗；side=null 是合法旧数据，不在这里强补侧别。
+function sanitizeConditionItem(item) {
+  const technique = TECHNIQUES.some((row) => row.id === item.technique) ? item.technique : "massage"
+  return {
+    ...item,
+    side: normalizeSide(item.side),
+    technique,
+    dose: clampDose(technique, item.dose),
+    ...sanitizeItemEquipment(item, technique),
+  }
 }
 
 export function fail(status, message) {
@@ -99,9 +162,9 @@ function sanitizePatient(patient, staffIds) {
           chiefSiteId: typeof condition.chiefSiteId === "string" ? condition.chiefSiteId : null,
           chiefSide: normalizeSide(condition.chiefSide),
           fresh: Boolean(condition.fresh),
-          items: condition.items.filter(
-            (item) => item && typeof item === "object" && typeof item.targetId === "string" && item.targetId,
-          ),
+          items: condition.items
+            .filter((item) => item && typeof item === "object" && typeof item.targetId === "string" && item.targetId)
+            .map(sanitizeConditionItem),
         }))
     : []
   const cleaned = {
@@ -119,7 +182,7 @@ function sanitizePatient(patient, staffIds) {
 }
 
 // 日条目内部（导入路径用）：数组字段补齐；认不出的手法/方向换成默认；派工只留名单里的人。
-function sanitizeDayEntry(entry, staffIds) {
+export function sanitizeDayEntry(entry, staffIds) {
   return {
     id: entry.id,
     patientId: entry.patientId,
@@ -145,11 +208,12 @@ function sanitizeDayEntry(entry, staffIds) {
           side: normalizeSide(item.side),
           technique,
           direction,
-          dose: item.dose && typeof item.dose === "object" ? structuredClone(item.dose) : defaultDose(technique),
+          dose: clampDose(technique, item.dose),
           assigneeId: typeof item.assigneeId === "string" && staffIds.has(item.assigneeId) ? item.assigneeId : null,
           done: Boolean(item.done),
           completedBy: typeof item.completedBy === "string" ? item.completedBy : null,
           completedAt: item.done && typeof item.completedAt === "string" ? item.completedAt : null,
+          ...sanitizeItemEquipment(item, technique),
         }
       }),
   }
@@ -178,9 +242,9 @@ export function sanitizeState(data) {
       name: template.name.trim(),
       chiefSiteId: typeof template.chiefSiteId === "string" ? template.chiefSiteId : null,
       chiefSide: normalizeSide(template.chiefSide),
-      items: template.items.filter(
-        (item) => item && typeof item === "object" && typeof item.targetId === "string" && item.targetId,
-      ),
+      items: template.items
+        .filter((item) => item && typeof item === "object" && typeof item.targetId === "string" && item.targetId)
+        .map(sanitizeConditionItem),
     }))
   const days = {}
   if (data.days && typeof data.days === "object" && !Array.isArray(data.days)) {
@@ -233,7 +297,11 @@ export function normalizeLoadedState(data) {
             conditionIds: Array.isArray(entry.conditionIds)
               ? entry.conditionIds.filter((row) => typeof row === "string")
               : [],
-            items: Array.isArray(entry.items) ? entry.items.filter((row) => row && typeof row === "object") : [],
+            items: Array.isArray(entry.items)
+              ? entry.items
+                  .filter((row) => row && typeof row === "object")
+                  .map((row) => ({ ...row, ...sanitizeItemEquipment(row, row.technique) }))
+              : [],
           })),
       }
     }
@@ -251,7 +319,9 @@ export function normalizeLoadedState(data) {
           .map((condition) => ({
             ...condition,
             items: Array.isArray(condition.items)
-              ? condition.items.filter((row) => row && typeof row === "object")
+              ? condition.items
+                  .filter((row) => row && typeof row === "object")
+                  .map((row) => ({ ...row, ...sanitizeItemEquipment(row, row.technique) }))
               : [],
           })),
       })),
@@ -259,7 +329,11 @@ export function normalizeLoadedState(data) {
       .filter((template) => template && typeof template === "object")
       .map((template) => ({
         ...template,
-        items: Array.isArray(template.items) ? template.items.filter((row) => row && typeof row === "object") : [],
+        items: Array.isArray(template.items)
+          ? template.items
+              .filter((row) => row && typeof row === "object")
+              .map((row) => ({ ...row, ...sanitizeItemEquipment(row, row.technique) }))
+          : [],
       })),
     days,
     lastExportAt: typeof data.lastExportAt === "string" ? data.lastExportAt : null,

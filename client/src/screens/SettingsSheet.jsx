@@ -18,6 +18,15 @@ export function SettingsSheet({ snap, pending, error, run, onClose, onRefresh })
   const importRef = useRef(null)
   const archivedPatients = (snap.patients || []).filter((patient) => patient.archived)
   const templates = snap.templates || []
+  const equipmentTypes = snap.equipmentTypes || []
+  const equipmentUnits = snap.equipmentUnits || []
+  const equipmentLedger = equipmentTypes.map((type) => {
+    const units = equipmentUnits
+      .filter((unit) => unit.equipmentTypeId === type.id)
+      .sort((left, right) => (left.order || 0) - (right.order || 0))
+    const shared = type.category === "shared" || type.requiresUnit === false
+    return { type, units, shared }
+  })
 
   function downloadExport(data) {
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" })
@@ -348,6 +357,40 @@ export function SettingsSheet({ snap, pending, error, run, onClose, onRefresh })
                       ))}
                     </div>
                   </>
+                ) : null}
+                {equipmentTypes.length ? (
+                  <details className="settings-equipment-ledger">
+                    <summary>
+                      <span className="settings-equipment-summary-title">设备台账</span>
+                      <span className="settings-equipment-summary-meta">
+                        {`${equipmentTypes.length} 类 · ${equipmentUnits.length} 台`}
+                      </span>
+                    </summary>
+                    <p className="settings-equipment-note">
+                      设备类型、机台和参数由系统目录统一管理；当前只读展示，暂不支持编辑。
+                    </p>
+                    <div className="settings-equipment-list">
+                      {equipmentLedger.map(({ type, units, shared }) => (
+                        <section key={type.id || type.name} className="settings-equipment-group">
+                          <div className="settings-equipment-heading">
+                            <span className="settings-equipment-name">
+                              {type.name || type.shortName || type.id || "未命名设备"}
+                            </span>
+                            <span className={shared ? "settings-equipment-shared" : "settings-equipment-count"}>
+                              {shared ? "共享" : `${units.length} 台`}
+                            </span>
+                          </div>
+                          <p className="settings-equipment-units">
+                            {units.length
+                              ? units.map((unit) => unit.name || unit.id).join("、")
+                              : shared
+                                ? "共享设备，不占具体机台"
+                                : "暂无具体机台"}
+                          </p>
+                        </section>
+                      ))}
+                    </div>
+                  </details>
                 ) : null}
               </div>
             </div>,

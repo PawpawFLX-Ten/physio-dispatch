@@ -99,7 +99,8 @@ export const api = {
   entry: (id) => request(withDevice(`/api/entries/${id}`)),
   addCondition: (id, name) => request(`/api/entries/${id}/conditions`, { method: "POST", body: { name } }),
   setChief: (id, targetId, side) => request(`/api/entries/${id}/chief`, { method: "POST", body: { targetId, side } }),
-  addItem: (id, targetId, side) => request(`/api/entries/${id}/items`, { method: "POST", body: { targetId, side } }),
+  addItem: (id, targetId, side, extra = {}) =>
+    request(`/api/entries/${id}/items`, { method: "POST", body: { targetId, side, ...extra } }),
   patchItem: (id, itemId, patch, expectedVersion) =>
     request(`/api/entries/${id}/items/${itemId}`, {
       method: "PATCH",

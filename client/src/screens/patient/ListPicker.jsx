@@ -1,16 +1,44 @@
 // 加项面板：说一句 + 常见搭配芯片 + 搜肌肉 + 全部目标点选。
 import { useMemo, useRef, useState } from "react"
-import { TARGETS, allowsChief, allowsWork, doseLabel, hasSides, techniqueLabel, targetTitle } from "@shared/catalog.js"
+import { TARGETS, allowsChief, allowsWork, doseLabel, hasSides, targetById, techniqueLabel, targetTitle } from "@shared/catalog.js"
 import { parseQuickOrder } from "@shared/quick-order.js"
 import { matchesInitials } from "../../pinyin.js"
 import { PairingChips } from "../../PairingChips.jsx"
+import {
+  equipmentItemSummary,
+  isEquipmentItem,
+  normalizeQuickOrderSides,
+} from "./helpers.js"
 import { ChoiceButton, Notice, Sheet } from "./ui.jsx"
 
-export function ListPicker({ entry, pairings, pending, notice, query, onQuery, onPickSite, onPickWork, onQuickAdd, onClose }) {
+export function ListPicker({
+  entry,
+  pairings,
+  staff = [],
+  equipmentTypes = [],
+  exerciseTemplates = [],
+  pending,
+  notice,
+  query,
+  onQuery,
+  onPickSite,
+  onPickWork,
+  onQuickAdd,
+  onClose,
+}) {
   const [quickText, setQuickText] = useState("")
   const sheetSearchRef = useRef(null)
-  const parsed = useMemo(() => parseQuickOrder(quickText), [quickText])
+  const parsed = useMemo(
+    () =>
+      normalizeQuickOrderSides(parseQuickOrder(quickText, { staff, equipment: equipmentTypes }), {
+        chiefSide: entry?.chiefSide,
+        chiefSiteId: entry?.chiefSiteId,
+      }),
+    [quickText, staff, equipmentTypes, entry?.chiefSide, entry?.chiefSiteId],
+  )
   const hasSomething = Boolean(parsed.chief) || parsed.items.length > 0
+  const parsedAssigneeName =
+    parsed.assigneeName || staff.find((person) => person.id === parsed.assigneeId)?.name || ""
   const needSite = !entry?.chiefSiteId
   const sites = useMemo(
     () => TARGETS.filter((target) => allowsChief(target) && matchesInitials(query, target.name)),
@@ -22,6 +50,8 @@ export function ListPicker({ entry, pairings, pending, notice, query, onQuery, o
   )
   const sideTags = (target) => (hasSides(target) ? ["left", "right"] : [null])
   const pairingIds = pairings?.[entry?.chiefSiteId] || []
+  // 腰/颈主诉本身无可侧化；旧服务端字段里可能残留上一次的 chiefSide，芯片必须以“无侧”呈现。
+  const pairingSide = hasSides(targetById(entry?.chiefSiteId)) ? entry?.chiefSide : null
   const addedSpots = useMemo(
     () => new Set((entry?.items || []).map((item) => `${item.targetId}:${item.side || ""}`)),
     [entry],
@@ -57,13 +87,28 @@ export function ListPicker({ entry, pairings, pending, notice, query, onQuery, o
             {parsed.chief ? (
               <p className="patient-quick-chief">{`要治 ${targetTitle(parsed.chief.targetId, parsed.chief.side)}`}</p>
             ) : null}
+            {parsedAssigneeName ? (
+              <p className="patient-quick-assignee">{`派给 ${parsedAssigneeName}`}</p>
+            ) : null}
             {parsed.items.length ? (
               <ol className="patient-quick-items">
-                {parsed.items.map((item, index) => (
-                  <li key={index}>
-                    {`${targetTitle(item.targetId, item.side)} · ${techniqueLabel(item.technique)} · ${doseLabel(item.technique, item.dose)}`}
-                  </li>
-                ))}
+                {parsed.items.map((item, index) => {
+                  const equipment = isEquipmentItem(item)
+                  const detail = equipment
+                    ? equipmentItemSummary(item, equipmentTypes, exerciseTemplates)
+                    : techniqueLabel(item.technique)
+                  // 设备参数已由 summary 展示；只在真有组次时补剂量，避免冲击波/超声出现“0组×0次”。
+                  const dose = equipment
+                    ? item.dose?.sets || item.dose?.reps
+                      ? doseLabel("equipment", item.dose)
+                      : ""
+                    : doseLabel(item.technique, item.dose)
+                  return (
+                    <li key={index}>
+                      {[targetTitle(item.targetId, item.side), detail, dose].filter(Boolean).join(" · ")}
+                    </li>
+                  )
+                })}
               </ol>
             ) : null}
             {parsed.unknown.length ? (
@@ -99,9 +144,10 @@ export function ListPicker({ entry, pairings, pending, notice, query, onQuery, o
           <p className="patient-label">常见搭配</p>
           <PairingChips
             ids={pairingIds}
-            side={entry.chiefSide}
+            side={pairingSide}
             added={addedSpots}
             disabled={pending}
+            splitSides
             onPick={(targetId, side) => onPickWork(targetId, side)}
           />
         </div>

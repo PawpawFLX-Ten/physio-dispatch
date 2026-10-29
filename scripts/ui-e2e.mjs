@@ -159,6 +159,8 @@ async function waitReady(page) {
 }
 
 async function tapBody(page, name, yaw, nudgeY = 0) {
+  // picks 每个目标只给一个确定性锚点；可侧化目标优先患者左侧。BodyParts3D
+  // 正面 x>0 是患者左侧，因此正 x 锚点对应的清单侧别是「左」。
   await run(page, `
     const view = document.querySelector(".body-stage-view")
     const canvas = view?.querySelector("canvas")
@@ -237,7 +239,7 @@ try {
   }
   await waitText(doctor.page, ["膝盖", "腘绳肌", "比目鱼肌", "足底", "腰"])
   const listOrder = await run(doctor.page, `return [...document.querySelectorAll(".patient-target")].map((node) => node.textContent).join(">")`)
-  if (listOrder !== "右腘绳肌>右比目鱼肌>右足底>腰") throw new Error(`清单顺序不对：${listOrder}`)
+  if (listOrder !== "左腘绳肌>左比目鱼肌>左足底>腰") throw new Error(`清单顺序不对：${listOrder}`)
   let labels = ""
   for (let attempt = 0; attempt < 20; attempt += 1) {
     labels = await run(doctor.page, `return [...document.querySelectorAll(".body-stage-label")].map((node) => node.textContent).filter(Boolean).sort().join(",")`)
@@ -342,7 +344,7 @@ try {
   await clickButton(doctor.page, "王阿姨")
   await waitText(doctor.page, ["比目鱼肌", "腘绳肌"])
   const doctorOrder = await run(doctor.page, `return [...document.querySelectorAll(".patient-target")].map((node) => node.textContent).join(">")`)
-  if (!doctorOrder.startsWith("右比目鱼肌>右腘绳肌")) throw new Error(`两台顺序不一致：${doctorOrder}`)
+  if (!doctorOrder.startsWith("左比目鱼肌>左腘绳肌")) throw new Error(`两台顺序不一致：${doctorOrder}`)
   const clinic = JSON.parse(fs.readFileSync(path.join(dataDir, "clinic.json")))
   const savedPatient = clinic.patients.find((patient) => patient.name === "王阿姨")
   const savedOrder = savedPatient.conditions[0].items.map((item) => item.targetId)

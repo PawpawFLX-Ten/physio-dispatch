@@ -13,9 +13,9 @@ export const DIRECTIONS = [
 ]
 
 export const TARGETS = [
-  { id: "knee", name: "膝盖", kind: "site", x: 0.2, y: 0.46, z: 0.1 },
+  { id: "knee", name: "膝盖", kind: "site", equipmentCapable: true, x: 0.2, y: 0.46, z: 0.1 },
   { id: "lumbar", name: "腰", kind: "both", x: 0, y: 1.02, z: -0.12 },
-  { id: "neck", name: "颈", kind: "site", x: 0, y: 1.48, z: 0.02 },
+  { id: "neck", name: "颈", kind: "site", equipmentCapable: true, x: 0, y: 1.48, z: 0.02 },
   { id: "shoulder", name: "肩", kind: "both", x: -0.34, y: 1.32, z: 0.02 },
   { id: "hamstring", name: "腘绳肌", kind: "muscle", x: -0.16, y: 0.7, z: -0.12 },
   { id: "quad", name: "股四头肌", kind: "muscle", x: 0.18, y: 0.72, z: 0.12 },
@@ -73,6 +73,11 @@ export function allowsChief(target) {
 
 export function allowsWork(target) {
   return target && target.kind !== "site"
+}
+
+// 少数纯部位（膝、颈）可以作为设备作用区域；它们仍不能作为普通手工下手项。
+export function allowsEquipment(target) {
+  return target && (target.kind !== "site" || target.equipmentCapable === true)
 }
 
 export function defaultDose(technique) {

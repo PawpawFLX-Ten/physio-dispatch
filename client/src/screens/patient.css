@@ -686,3 +686,262 @@
   color: var(--ink-list);
   line-height: 1.5;
 }
+
+/* 人体下方的加项模式：默认手动，设备模式只多一次选择，不挡原主路径。 */
+.patient-mode-switch {
+  display: inline-grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  align-self: center;
+  margin: 8px 16px 0;
+  padding: 4px;
+  border-radius: 999px;
+  background: var(--card-2);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.patient-mode-btn {
+  min-width: 76px;
+  min-height: 44px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 16px;
+}
+
+.patient-mode-btn.is-on {
+  background: var(--accent);
+  color: var(--bg);
+  box-shadow: 0 1px 3px rgba(28, 25, 21, 0.12);
+}
+
+.patient-hint.is-mode {
+  color: var(--accent);
+  font-size: 16px;
+  line-height: 1.4;
+}
+
+/* 设备卡片横向 rail：拇指一划就能看到下一台，卡片自身仍保留 44px 点击区。 */
+.patient-equipment-section {
+  margin-bottom: 14px;
+}
+
+.patient-equipment-rail {
+  display: flex;
+  gap: 10px;
+  margin: 0 -16px;
+  padding: 0 16px 4px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x proximity;
+  -webkit-overflow-scrolling: touch;
+}
+
+.patient-equipment-card {
+  flex: 0 0 min(82%, 300px);
+  scroll-snap-align: start;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 16px;
+  background: var(--card);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.patient-equipment-card.is-template {
+  background: var(--card-2);
+}
+
+.patient-equipment-type,
+.patient-equipment-template,
+.patient-equipment-unit {
+  min-height: 44px;
+  border: 0;
+  border-radius: 12px;
+  padding: 10px 12px;
+  text-align: left;
+  background: var(--card-2);
+  box-shadow: inset 0 0 0 1px var(--line);
+  font-size: 17px;
+}
+
+.patient-equipment-type,
+.patient-equipment-template {
+  background: var(--accent);
+  color: var(--bg);
+  box-shadow: none;
+  font-weight: 700;
+}
+
+.patient-equipment-type:active,
+.patient-equipment-template:active,
+.patient-equipment-unit:active {
+  filter: brightness(0.94);
+}
+
+.patient-equipment-type:disabled,
+.patient-equipment-template:disabled,
+.patient-equipment-unit:disabled {
+  opacity: 0.55;
+}
+
+.patient-equipment-meta,
+.patient-equipment-params,
+.patient-equipment-shared {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.patient-equipment-params {
+  color: var(--ink-list);
+  overflow-wrap: anywhere;
+}
+
+.patient-equipment-units {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.patient-equipment-unit {
+  flex: 1 1 auto;
+  min-width: 120px;
+  background: var(--card);
+  color: var(--ink);
+  font-size: 15px;
+}
+
+.patient-equipment-current {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin-bottom: 12px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: var(--card-2);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.patient-equipment-current strong {
+  font-size: 21px;
+}
+
+.patient-equipment-eyebrow {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.patient-equipment-side {
+  margin-left: auto;
+  color: var(--accent);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.patient-equipment-pending {
+  margin: 0 0 10px;
+  color: var(--accent);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.patient-equipment-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 4px 0 14px;
+  padding: 16px;
+  border-radius: 14px;
+  background: var(--card-2);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--muted);
+}
+
+.patient-equipment-empty strong {
+  color: var(--ink);
+  font-size: 17px;
+}
+
+.patient-equipment-empty span {
+  font-size: 14px;
+}
+
+/* 任务卡里的关联部位单独一行；主 target 仍在标题上，不重复印。 */
+.patient-row-linked {
+  margin: 2px 0 0;
+  color: var(--accent);
+  font-size: 14px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.patient-meta.is-equipment {
+  color: var(--ink-list);
+  overflow-wrap: anywhere;
+}
+
+/* 操作卡里的设备信息只读：参数编辑本轮不做，不生成看不出范围的输入控件。 */
+.patient-equipment-readonly {
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: var(--card-2);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.patient-equipment-readonly-title {
+  margin: 0 0 8px;
+  color: var(--accent);
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.patient-equipment-readonly dl {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin: 0;
+}
+
+.patient-equipment-readonly dl > div {
+  display: grid;
+  grid-template-columns: 4em minmax(0, 1fr);
+  gap: 8px;
+}
+
+.patient-equipment-readonly dt {
+  color: var(--muted);
+  font-size: 15px;
+}
+
+.patient-equipment-readonly dd {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.patient-equipment-linked,
+.patient-equipment-readonly-hint {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.patient-equipment-readonly-hint {
+  color: var(--soft);
+}
+
+.patient-quick-assignee {
+  margin: 0 0 6px;
+  color: var(--accent);
+  font-size: 14px;
+  font-weight: 700;
+}

@@ -1,6 +1,20 @@
 // 病症模板：存一套手法、一键套用。
 import { fail, id } from "./helpers.js"
 
+
+function equipmentFieldsOf(item) {
+  return {
+    equipmentTypeId: typeof item?.equipmentTypeId === "string" ? item.equipmentTypeId : null,
+    equipmentUnitId: typeof item?.equipmentUnitId === "string" ? item.equipmentUnitId : null,
+    exerciseTemplateId: typeof item?.exerciseTemplateId === "string" ? item.exerciseTemplateId : null,
+    parameters:
+      item?.parameters && typeof item.parameters === "object" && !Array.isArray(item.parameters)
+        ? structuredClone(item.parameters)
+        : {},
+    linkedTargets: Array.isArray(item?.linkedTargets) ? structuredClone(item.linkedTargets) : [],
+  }
+}
+
 export const templateMethods = {
   templateById(templateId) {
     return this.state.templates.find((item) => item.id === templateId) || null
@@ -29,6 +43,7 @@ export const templateMethods = {
         technique: item.technique,
         direction: item.direction,
         dose: structuredClone(item.dose),
+        ...equipmentFieldsOf(item),
       })),
     }
     this.state.templates.push(template)
@@ -61,6 +76,7 @@ export const templateMethods = {
         technique: item.technique,
         direction: item.direction,
         dose: structuredClone(item.dose),
+        ...equipmentFieldsOf(item),
       })),
     }
   },

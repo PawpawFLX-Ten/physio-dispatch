@@ -1,14 +1,42 @@
 // 今日单怎么映回人体：哪一侧、治哪/下手、做完变淡。判断放这儿，别只写在 three 回调里。
+import { hasSides, targetById } from "./catalog.js"
+
+const SIDES = ["left", "right"]
 
 export function markKey(targetId, side) {
   return `${targetId}:${side || "mid"}`
 }
 
-/** 一项对应模型上哪些键：有左右只标那一侧；没有左右（腰/颈）落 mid。 */
+function keysForTarget(targetId, side) {
+  if (!targetId) return []
+  const target = targetById(targetId)
+  // 旧数据可能没有侧别：可侧化目标两边都亮，腰/颈仍落中键。
+  if (hasSides(target)) {
+    if (side === "left" || side === "right") return [markKey(targetId, side)]
+    return SIDES.map((each) => markKey(targetId, each))
+  }
+  // 未知目标保留显式侧别；目录里没有左右概念的腰/颈永远落 mid。
+  if (!target && (side === "left" || side === "right")) return [markKey(targetId, side)]
+  return [markKey(targetId, null)]
+}
+
+/**
+ * 一项对应模型上哪些键：主目标永远在前；linkedTargets 只补充关联键，
+ * 不改变这一项在主目标序号里的位置。
+ */
 export function keysForItem(item) {
   if (!item?.targetId) return []
-  if (item.side) return [markKey(item.targetId, item.side)]
-  return [markKey(item.targetId, null)]
+  const keys = []
+  const add = (targetId, side) => {
+    for (const key of keysForTarget(targetId, side)) {
+      if (!keys.includes(key)) keys.push(key)
+    }
+  }
+  add(item.targetId, item.side)
+  if (Array.isArray(item.linkedTargets)) {
+    for (const linked of item.linkedTargets) add(linked?.targetId, linked?.side)
+  }
+  return keys
 }
 
 /**
@@ -62,12 +90,19 @@ export function ordersFor(targetId, side, state) {
   return state.byKey.get(markKey(targetId, side))?.orders || []
 }
 
-/** 点选时：这块肉（含左右）上已有的项。 */
+/** 点选时：这块肉（含左右）上已有的项。旧数据的空侧别按 wildcard 处理。 */
 export function itemsOnSpot(items, targetId, side) {
   const list = Array.isArray(items) ? items : []
   const want = side || null
+  const matches = (markTargetId, markSide) => {
+    if (markTargetId !== targetId) return false
+    if (!markSide) return true
+    return markSide === want
+  }
   return list.filter((item) => {
-    if (item?.targetId !== targetId) return false
-    return (item.side || null) === want
+    if (!item?.targetId) return false
+    if (matches(item.targetId, item.side)) return true
+    return Array.isArray(item.linkedTargets)
+      && item.linkedTargets.some((linked) => matches(linked?.targetId, linked?.side))
   })
 }

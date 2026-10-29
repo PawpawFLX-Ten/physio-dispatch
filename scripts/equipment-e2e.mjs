@@ -1,0 +1,238 @@
+/* global document, PointerEvent, localStorage, HTMLInputElement, Event */
+// 设备专项浏览器回归：临时数据 + 独立构建目录 + 独立端口，不碰真实 data/。
+import { spawn, spawnSync } from "node:child_process"
+import fs from "node:fs"
+import os from "node:os"
+import path from "node:path"
+import { fileURLToPath } from "node:url"
+import { chromium } from "playwright-core"
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
+const PORT = Number(process.env.EQUIPMENT_E2E_PORT || 8180)
+const BASE = `http://127.0.0.1:${PORT}`
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+function buildClient() {
+  if (process.env.SKIP_BUILD === "1") return
+  const result = spawnSync(
+    process.execPath,
+    [path.join(root, "node_modules", "vite", "bin", "vite.js"), "build", "--config", "client/vite.config.js", "--outDir", "dist-e2e"],
+    { cwd: root, stdio: "inherit" },
+  )
+  if (result.status !== 0) throw new Error("前端打包失败")
+}
+
+async function startServer(dataDir) {
+  const server = spawn(process.execPath, ["server/index.js"], {
+    cwd: root,
+    env: {
+      ...process.env,
+      DATA_DIR: dataDir,
+      PORT: String(PORT),
+      HOST: "127.0.0.1",
+      DIST_DIR: path.join(root, "client", "dist-e2e"),
+    },
+    stdio: ["ignore", "ignore", "pipe"],
+  })
+  server.stderr.on("data", (chunk) => process.stderr.write(`[equipment-e2e] ${chunk}`))
+  for (let i = 0; i < 80; i += 1) {
+    try {
+      if ((await fetch(`${BASE}/api/health`)).ok) return server
+    } catch {
+      /* 服务还没起来 */
+    }
+    await sleep(150)
+  }
+  server.kill()
+  throw new Error("设备专项临时服务没起来")
+}
+
+async function launchBrowser() {
+  const direct = await chromium.launch({ headless: true }).catch(() => null)
+  if (direct) return direct
+  const candidates = [
+    process.env.CHROME_PATH,
+    ...fs
+      .readdirSync(path.join(os.homedir(), ".cache", "ms-playwright"))
+      .filter((name) => /^chromium-\d+$/.test(name))
+      .sort()
+      .reverse()
+      .flatMap((name) => [
+        path.join(os.homedir(), ".cache", "ms-playwright", name, "chrome-linux", "chrome"),
+        path.join(os.homedir(), ".cache", "ms-playwright", name, "chrome-linux64", "chrome"),
+      ]),
+    "/usr/bin/chromium",
+    "/usr/bin/chromium-browser",
+    "/usr/bin/google-chrome",
+  ].filter(Boolean)
+  for (const executablePath of candidates) {
+    if (!fs.existsSync(executablePath)) continue
+    try {
+      return await chromium.launch({ headless: true, executablePath })
+    } catch {
+      /* 继续尝试下一个 */
+    }
+  }
+  throw new Error("找不到可用 Chromium，可设置 CHROME_PATH")
+}
+
+const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "clinic-equipment-e2e-"))
+let server = null
+let browser = null
+
+const bodyText = (page) => page.evaluate(() => document.body.innerText)
+async function waitText(page, parts, timeout = 15000) {
+  const start = Date.now()
+  let latest = ""
+  while (Date.now() - start < timeout) {
+    latest = await bodyText(page)
+    if (parts.every((part) => latest.includes(part))) return latest
+    await sleep(150)
+  }
+  throw new Error(`等待超时：${parts.join(" / ")}\n${latest.slice(0, 1600)}`)
+}
+async function waitGone(page, part, timeout = 12000) {
+  const start = Date.now()
+  while (Date.now() - start < timeout) {
+    if (!(await bodyText(page)).includes(part)) return
+    await sleep(150)
+  }
+  throw new Error(`仍然可见：${part}`)
+}
+async function clickButton(page, name) {
+  const clicked = await page.evaluate((label) => {
+    const buttons = [...document.querySelectorAll("button")]
+    const exact = buttons.find((node) => node.textContent.trim().replace(/\s+/g, " ") === label)
+    const row = buttons.find((node) => node.classList.contains("row-btn") && node.textContent.replace(/\s+/g, "").includes(label))
+    const button = exact || row
+    if (!button) return false
+    button.click()
+    return true
+  }, name)
+  if (!clicked) throw new Error(`找不到按钮：${name}`)
+}
+async function tapBody(page, name, yaw = 0) {
+  await page.evaluate(({ targetName, yawValue }) => {
+    const view = document.querySelector(".body-stage-view")
+    const canvas = view?.querySelector("canvas")
+    if (!view || !canvas || view.dataset.ready !== "1") throw new Error("人体没准备好")
+    const picks = JSON.parse(view.dataset.picks)
+    const camera = JSON.parse(view.dataset.camera)
+    const target = picks[targetName]
+    if (!target) throw new Error(`没有可点位置：${targetName}`)
+    const cos = Math.cos(yawValue)
+    const sin = Math.sin(yawValue)
+    const x = target.x * cos + target.z * sin
+    const z = -target.x * sin + target.z * cos
+    const y = target.y
+    const rect = canvas.getBoundingClientRect()
+    const tan = Math.tan((camera.fov * Math.PI) / 180 / 2)
+    const aspect = rect.width / rect.height
+    const depth = camera.z - z
+    const ndcX = x / (depth * tan * aspect)
+    const ndcY = (y - camera.lookY) / (depth * tan)
+    const clientX = rect.left + ((ndcX + 1) / 2) * rect.width
+    const clientY = rect.top + ((1 - ndcY) / 2) * rect.height
+    view.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, clientX, clientY, pointerId: 1, button: 0 }))
+    view.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, clientX, clientY, pointerId: 1, button: 0 }))
+  }, { targetName: name, yawValue: yaw })
+}
+
+try {
+  buildClient()
+  server = await startServer(dataDir)
+  browser = await launchBrowser()
+  const page = await browser.newPage({ viewport: { width: 430, height: 932 } })
+  const pageErrors = []
+  page.on("pageerror", (error) => pageErrors.push(error.message))
+  await page.goto(`${BASE}/?device=equipment-e2e`, { waitUntil: "load" })
+  await sleep(350)
+  const deviceId = await page.evaluate(() => localStorage.getItem("physio-device-id:equipment-e2e"))
+  const post = async (pathName, body, requestDeviceId = deviceId) => {
+    const response = await fetch(`${BASE}${pathName}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ deviceId: requestDeviceId, ...body }),
+    })
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok) throw new Error(`${pathName}: ${data.error || response.status}`)
+    return data
+  }
+
+  await post("/api/setup", { staffName: "之之" })
+  await post("/api/claim", { deviceId: "equipment-e2e-aide", staffName: "小李" })
+  const patient = await post("/api/patients", { name: "设备测试阿姨", conditionName: "右膝痛" })
+  await post(`/api/entries/${patient.entry.id}/chief`, { targetId: "knee", side: "right" })
+
+  await page.reload({ waitUntil: "load" })
+  await waitText(page, ["今日单", "设备测试阿姨"])
+  await clickButton(page, "设备测试阿姨")
+  await waitText(page, ["要治 右膝盖"])
+  for (let i = 0; i < 200; i += 1) {
+    if (await page.evaluate(() => document.querySelector(".body-stage-view")?.dataset.ready === "1")) break
+    await sleep(150)
+  }
+  await sleep(300)
+
+  // 设备模式点主诉区域本身：应该打开设备选择器，而不是进入“重选主诉”。
+  await clickButton(page, "设备")
+  await tapBody(page, "knee")
+  await waitText(page, ["选择设备或动作", "冲击波"])
+  await clickButton(page, "冲击波")
+  await waitGone(page, "选择设备或动作")
+  await waitText(page, ["冲击波 1 号机", "脉冲次数 2000 次"])
+  console.log("1 设备模式主诉区域添加冲击波：通过")
+
+  // 动作模板：一个设备动作关联多个人体目标。
+  await tapBody(page, "quad", Math.PI)
+  await waitText(page, ["选择设备或动作", "弹力带终末伸膝"])
+  await clickButton(page, "弹力带终末伸膝")
+  await waitGone(page, "选择设备或动作")
+  await waitText(page, ["弹力带终末伸膝", "3 组 × 10 次"])
+  console.log("2 动作模板一次入库并关联人体：通过")
+
+  // 一句话同时带设备、参数和员工。
+  await clickButton(page, "加项")
+  await page.waitForSelector(".patient-quick-input", { state: "visible" })
+  await page.evaluate(() => {
+    const input = document.querySelector(".patient-quick-input")
+    const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set
+    set.call(input, "冈下肌超声波8分钟派给小李")
+    input.dispatchEvent(new Event("input", { bubbles: true }))
+  })
+  await waitText(page, ["派给 小李", "超声", "时长 8 分钟"])
+  await clickButton(page, "加 1 项")
+  await waitText(page, ["超声 1 号机", "小李"])
+  console.log("3 一句话带设备和员工：通过")
+
+  const saved = JSON.parse(fs.readFileSync(path.join(dataDir, "clinic.json"), "utf8"))
+  const entry = Object.values(saved.days).flatMap((day) => day.entries).find((row) => row.id === patient.entry.id)
+  const equipmentItems = entry.items.filter((item) => item.equipmentTypeId)
+  const shockwave = equipmentItems.find((item) => item.equipmentTypeId === "shockwave")
+  const band = equipmentItems.find((item) => item.exerciseTemplateId === "band-terminal-knee-extension")
+  const ultrasound = equipmentItems.find((item) => item.equipmentTypeId === "ultrasound")
+  if (!shockwave || shockwave.equipmentUnitId !== "shockwave-1") throw new Error("冲击波未落库或未指定机台")
+  if (!band || !band.linkedTargets?.length) throw new Error("弹力带模板未保留关联目标")
+  if (!ultrasound || !ultrasound.assigneeId) throw new Error("超声未保留派工")
+  if (ultrasound.parameters.minutes !== 8) throw new Error("超声时长参数未落库")
+  if ([shockwave, band, ultrasound].some((item) => item.side !== "left" && item.side !== "right")) {
+    throw new Error("设备任务出现空侧")
+  }
+  console.log("4 设备、机台、参数、关联目标、派工、侧别落库：通过")
+
+  await clickButton(page, "收起")
+  await clickButton(page, "返回")
+  const afterBack = await bodyText(page)
+  if (afterBack.includes("今天的改动要记回病症吗")) await clickButton(page, "留在今天")
+  await waitText(page, ["今日单"])
+  await clickButton(page, "按设备")
+  await waitText(page, ["冲击波", "超声", "弹力带终末伸膝", "设备测试阿姨", "膝盖"])
+  console.log("5 今日单按设备视图展示设备任务：通过")
+
+  if (pageErrors.length) throw new Error(`页面异常：${pageErrors.join(" | ")}`)
+  console.log("EQUIPMENT_E2E_OK")
+} finally {
+  await browser?.close().catch(() => {})
+  server?.kill()
+  fs.rmSync(dataDir, { recursive: true, force: true })
+}

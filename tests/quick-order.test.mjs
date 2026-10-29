@@ -1,6 +1,7 @@
 import test from "node:test"
 import assert from "node:assert/strict"
 import { parseQuickOrder } from "../shared/quick-order.js"
+import { EQUIPMENT_TYPES } from "../shared/equipment.js"
 
 test("a spoken chain becomes chief plus ordered items", () => {
   const parsed = parseQuickOrder("左膝，股四头按摩8分钟，然后腘绳肌松解，比目鱼肌")
@@ -179,11 +180,79 @@ test("stuttered duplicate target collapses into one item", () => {
   assert.equal(parseQuickOrder("冈上肌，再来一个冈上肌").items.length, 2)
 })
 
-test("both-sided chief is not carried as side=both", () => {
-  // 「双侧」只管紧跟着的那个目标（既有语义）：主诉吃掉后，后面的项不带侧。
+test("both-sided chief carries to work items as two explicit sides", () => {
   const parsed = parseQuickOrder("双膝 股四头按摩8分钟")
   assert.deepEqual(parsed.chief, { targetId: "knee", side: null })
-  assert.equal(parsed.items[0].side, null)
+  assert.deepEqual(parsed.items.map((item) => item.side), ["left", "right"])
   const both = parseQuickOrder("双侧股四头按摩8分钟")
   assert.deepEqual(both.items.map((item) => item.side), ["left", "right"])
+})
+
+test("explicit staff phrase becomes assignee without polluting items", () => {
+  const staff = [
+    { id: "staff-li", name: "小李" },
+    { id: "staff-wang", name: "小王" },
+  ]
+  const parsed = parseQuickOrder("右肩 冈上肌松解8分钟 派给小李", { staff })
+  assert.deepEqual(parsed.chief, { targetId: "shoulder", side: "right" })
+  assert.equal(parsed.items.length, 1)
+  assert.equal(parsed.items[0].targetId, "supraspinatus")
+  assert.equal(parsed.assigneeId, "staff-li")
+  assert.equal(parsed.assigneeName, "小李")
+  assert.equal(parsed.unknown.length, 0)
+})
+
+test("staff aliases require an explicit assignment prefix", () => {
+  const staff = [{ id: "staff-li", name: "小李" }]
+  const parsed = parseQuickOrder("右膝 小李 股四头肌按摩", { staff })
+  assert.equal(parsed.assigneeId, null)
+  assert.equal(parsed.items[0].targetId, "quad")
+  assert.ok(parsed.unknown.includes("小李"))
+})
+
+test("equipment aliases attach to the current work item and parse shockwave shots", () => {
+  const staff = [{ id: "staff-li", name: "小李" }]
+  const equipment = [
+    { id: "shockwave", name: "冲击波", aliases: ["冲击波治疗"], parameterSchema: [{ key: "pulses" }] },
+    { id: "ultrasound", name: "超声波", aliases: ["超声"], parameterSchema: [{ key: "minutes" }] },
+    { id: "elastic-band", name: "弹力带", aliases: ["弹力绳"], parameterSchema: [{ key: "resistance" }] },
+  ]
+  const parsed = parseQuickOrder("右肩 冈上肌冲击波2000次 给小李", { staff, equipment })
+  assert.deepEqual(parsed.chief, { targetId: "shoulder", side: "right" })
+  assert.equal(parsed.items[0].equipmentTypeId, "shockwave")
+  assert.equal(parsed.items[0].technique, "equipment")
+  assert.deepEqual(parsed.items[0].parameters, { pulses: 2000 })
+  assert.equal(parsed.assigneeId, "staff-li")
+  assert.equal(parsed.unknown.length, 0)
+})
+
+test("equipment can be spoken before the target and keeps minute parameters", () => {
+  const equipment = [{ id: "ultrasound", name: "超声波", aliases: ["超声"], parameterSchema: [{ key: "minutes" }] }]
+  const parsed = parseQuickOrder("左膝 超声波8分钟 股四头肌", { equipment })
+  assert.deepEqual(parsed.chief, { targetId: "knee", side: "left" })
+  assert.equal(parsed.items[0].equipmentTypeId, "ultrasound")
+  assert.equal(parsed.items[0].technique, "equipment")
+  assert.deepEqual(parsed.items[0].parameters, { minutes: 8 })
+})
+
+test("band exercise keeps sets and reps in parameters", () => {
+  const equipment = [{ id: "elastic-band", name: "弹力带", aliases: ["弹力绳"], parameterSchema: [{ key: "resistance" }] }]
+  const parsed = parseQuickOrder("左膝 股四头肌弹力带3组15次", { equipment })
+  assert.equal(parsed.items[0].equipmentTypeId, "elastic-band")
+  assert.deepEqual(parsed.items[0].dose, { sets: 3, reps: 15 })
+  assert.deepEqual(parsed.items[0].parameters, {})
+})
+
+
+test("real equipment catalog parses device names and schema parameters", () => {
+  const parsed = parseQuickOrder("右肩 冈上肌冲击波2000次 冈下肌超声波8分钟 给小王", {
+    staff: [{ id: "staff-wang", name: "小王" }],
+    equipment: EQUIPMENT_TYPES,
+  })
+  assert.equal(parsed.assigneeId, "staff-wang")
+  assert.equal(parsed.items.length, 2)
+  assert.equal(parsed.items[0].equipmentTypeId, "shockwave")
+  assert.deepEqual(parsed.items[0].parameters, { pulses: 2000 })
+  assert.equal(parsed.items[1].equipmentTypeId, "ultrasound")
+  assert.deepEqual(parsed.items[1].parameters, { minutes: 8 })
 })

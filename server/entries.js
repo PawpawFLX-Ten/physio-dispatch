@@ -3,19 +3,224 @@ import {
   DIRECTIONS,
   TECHNIQUES,
   allowsChief,
+  allowsEquipment,
   clampDose,
   defaultDose,
+  hasSides,
   targetById,
   targetTitle,
 } from "../shared/catalog.js"
+import {
+  chooseEquipmentUnitId,
+  equipmentTypeById,
+  equipmentUnitById,
+  exerciseTemplateById,
+  sanitizeEquipmentParameters,
+} from "../shared/equipment.js"
 import { assertExpectedVersion, bumpEntryVersion, fail, id, normalizeSide, todayKey } from "./helpers.js"
 
-// 下手项的部位必须真实存在，且不能是纯部位（膝盖这类要先当作要治的地方）。
+// 下手项的部位必须真实存在；纯 site 仍只能作为主诉，kind=both 的区域可做设备/区域级下手项。
 // 点选、说一句、撤销插回三条路共用同一句报错。
 function workTargetOrThrow(targetId) {
   const target = targetById(targetId)
   if (!target || target.kind === "site") fail(400, "这个位置要先当作要治的地方，不能直接下手")
   return target
+}
+
+// 设备可以把膝、颈这类纯部位当作作用区域；普通手工项仍不能。
+function equipmentTargetOrThrow(targetId) {
+  const target = targetById(targetId)
+  if (!target || !allowsEquipment(target)) fail(400, "这个位置不能关联设备")
+  return target
+}
+
+function hasOwn(object, key) {
+  return Boolean(object) && Object.prototype.hasOwnProperty.call(object, key)
+}
+
+// 病症存档和今日项共用同一组器械字段，避免今天用了设备、回写时却悄悄丢设备。
+function equipmentFieldsOf(item) {
+  return {
+    equipmentTypeId: typeof item?.equipmentTypeId === "string" ? item.equipmentTypeId : null,
+    equipmentUnitId: typeof item?.equipmentUnitId === "string" ? item.equipmentUnitId : null,
+    exerciseTemplateId: typeof item?.exerciseTemplateId === "string" ? item.exerciseTemplateId : null,
+    parameters:
+      item?.parameters && typeof item.parameters === "object" && !Array.isArray(item.parameters)
+        ? structuredClone(item.parameters)
+        : {},
+    linkedTargets: Array.isArray(item?.linkedTargets) ? structuredClone(item.linkedTargets) : [],
+  }
+}
+
+function equipmentUsageToday(store) {
+  const usage = {}
+  for (const entry of store.todayRecord().entries || []) {
+    for (const item of entry.items || []) {
+      if (typeof item?.equipmentUnitId !== "string" || !item.equipmentUnitId) continue
+      usage[item.equipmentUnitId] = (usage[item.equipmentUnitId] || 0) + 1
+    }
+  }
+  return usage
+}
+
+function resolveSide(target, requestedSide, fallbackSide, strict) {
+  let side = normalizeSide(requestedSide) || normalizeSide(fallbackSide)
+  if (!hasSides(target)) side = null
+  if (strict && hasSides(target) && !side) fail(400, "请选择左侧或右侧")
+  return side
+}
+
+function resolveAssignee(store, input, previous, staff) {
+  if (hasOwn(input, "assigneeId")) {
+    if (input.assigneeId === null || input.assigneeId === "") return null
+    if (typeof input.assigneeId !== "string" || !store.state.staff.some((person) => person.id === input.assigneeId)) {
+      fail(404, "找不到这个人")
+    }
+    return input.assigneeId
+  }
+  return previous?.assigneeId || staff.id
+}
+
+// 新 item 的唯一预校验入口：只返回完整数据，不碰 entry。调用方把全部项都算完后再 splice。
+// options.fallbackChiefSide 让 quickAdd 本轮刚设的主诉侧也能给下属项兜底。
+function prepareNewItem({ store, staff, entry, input, previous, fallbackTechnique, inheritPrevious, options = {} }) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) fail(400, "缺少要加的项")
+
+  const templateId =
+    typeof input.exerciseTemplateId === "string" && input.exerciseTemplateId ? input.exerciseTemplateId : null
+  let template = null
+  if (templateId) {
+    template = exerciseTemplateById(templateId)
+    if (!template) fail(400, "找不到动作模板")
+  }
+
+  let targetId = typeof input.targetId === "string" ? input.targetId : ""
+  if (!targetId && template?.linkedTargets?.length) targetId = template.linkedTargets[0].targetId
+  if (!targetId) fail(400, "请选择治疗部位")
+  const looksLikeEquipment =
+    Boolean(template) || input.technique === "equipment" || Boolean(input.equipmentTypeId) || Boolean(input.equipmentUnitId)
+  const target = looksLikeEquipment ? equipmentTargetOrThrow(targetId) : workTargetOrThrow(targetId)
+
+  let equipmentTypeId =
+    typeof input.equipmentTypeId === "string" && input.equipmentTypeId ? input.equipmentTypeId : null
+  const requestedUnitId =
+    typeof input.equipmentUnitId === "string" && input.equipmentUnitId ? input.equipmentUnitId : null
+  let type = null
+  if (equipmentTypeId) {
+    type = equipmentTypeById(equipmentTypeId)
+    if (!type) fail(400, "找不到设备类型")
+  }
+  if (requestedUnitId) {
+    const unit = equipmentUnitById(requestedUnitId)
+    if (!unit) fail(400, "找不到这台设备")
+    if (type && unit.equipmentTypeId !== type.id) fail(400, "这台机和设备类型不匹配")
+    if (!type) {
+      type = equipmentTypeById(unit.equipmentTypeId)
+      equipmentTypeId = type?.id || null
+    }
+  }
+  if (template) {
+    if (type && type.id !== template.equipmentTypeId) fail(400, "动作模板与设备类型不匹配")
+    type = equipmentTypeById(template.equipmentTypeId)
+    equipmentTypeId = type?.id || null
+  }
+  if (template && !template.compatibleTargetIds.includes(targetId)) {
+    fail(400, "这个动作模板不适用这个部位")
+  }
+
+  let technique = typeof input.technique === "string" && input.technique ? input.technique : ""
+  if (technique) {
+    if (!TECHNIQUES.some((row) => row.id === technique)) fail(400, "手法不对")
+  } else if (template || equipmentTypeId || requestedUnitId) {
+    technique = "equipment"
+  } else {
+    technique = fallbackTechnique || "massage"
+  }
+
+  const hasEquipmentInput =
+    Boolean(template || equipmentTypeId || requestedUnitId) ||
+    hasOwn(input, "parameters") ||
+    hasOwn(input, "linkedTargets")
+  if (technique !== "equipment" && hasEquipmentInput) fail(400, "只有器械项可以关联设备")
+
+  let direction = input.direction
+  if (direction !== undefined && direction !== null) {
+    if (!DIRECTIONS.some((row) => row.id === direction)) fail(400, "方向不对")
+  } else if (template?.defaultDirection) {
+    direction = template.defaultDirection
+  } else if (inheritPrevious && previous?.direction) {
+    direction = previous.direction
+  } else {
+    direction = "along"
+  }
+
+  const fallbackChiefSide = hasOwn(options, "fallbackChiefSide") ? options.fallbackChiefSide : entry.chiefSide
+  const side = resolveSide(target, input.side, fallbackChiefSide, technique === "equipment")
+
+  let linkedTargets = []
+  if (technique === "equipment") {
+    const rawLinkedTargets =
+      hasOwn(input, "linkedTargets") && input.linkedTargets !== undefined
+        ? input.linkedTargets
+        : template?.linkedTargets || []
+    if (!Array.isArray(rawLinkedTargets)) fail(400, "关联目标格式不对")
+    const seen = new Set()
+    for (const row of rawLinkedTargets) {
+      if (!row || typeof row !== "object") fail(400, "关联目标格式不对")
+      const linkedTarget = technique === "equipment" ? equipmentTargetOrThrow(row.targetId) : workTargetOrThrow(row.targetId)
+      if (template && !template.compatibleTargetIds.includes(linkedTarget.id)) {
+        fail(400, "这个动作模板不适用这个部位")
+      }
+      const linkedSide = resolveSide(linkedTarget, row.side, side || fallbackChiefSide, true)
+      const key = `${linkedTarget.id}:${linkedSide || ""}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      linkedTargets.push({ targetId: linkedTarget.id, side: linkedSide })
+    }
+  }
+
+  let parameters = {}
+  if (technique === "equipment") {
+    const mergedParameters = {
+      ...(template?.defaultParameters || type?.defaultParameters || {}),
+      ...(input.parameters && typeof input.parameters === "object" && !Array.isArray(input.parameters)
+        ? input.parameters
+        : {}),
+    }
+    parameters = sanitizeEquipmentParameters(type?.id || null, mergedParameters)
+  }
+
+  let equipmentUnitId = null
+  if (technique === "equipment" && type) {
+    try {
+      equipmentUnitId = chooseEquipmentUnitId(type.id, requestedUnitId, options.unitUsage || {})
+    } catch (error) {
+      fail(400, error.message)
+    }
+  }
+
+  let doseInput
+  if (hasOwn(input, "dose")) doseInput = input.dose
+  else if (template) doseInput = template.defaultDose
+  else if (inheritPrevious && previous && (!hasOwn(input, "technique") || input.technique === previous.technique)) {
+    doseInput = previous.dose
+  }
+  const dose = clampDose(technique, doseInput)
+  const assigneeId = resolveAssignee(store, input, previous, staff)
+
+  return {
+    targetId,
+    side,
+    technique,
+    direction,
+    dose,
+    assigneeId,
+    equipmentTypeId: type?.id || null,
+    equipmentUnitId,
+    exerciseTemplateId: template?.id || null,
+    parameters,
+    linkedTargets,
+  }
 }
 
 // 焦点病症：没设或已失效时，退回最后挂进今天的那条。
@@ -107,6 +312,7 @@ export const entryMethods = {
         technique: item.technique,
         direction: item.direction,
         dose: structuredClone(item.dose),
+        ...equipmentFieldsOf(item),
         assigneeId: item.assigneeId || null,
         done: false,
         completedBy: null,
@@ -165,6 +371,7 @@ export const entryMethods = {
         technique: item.technique,
         direction: item.direction,
         dose: structuredClone(item.dose),
+        ...equipmentFieldsOf(item),
         assigneeId: item.assigneeId || null,
         done: false,
         completedBy: null,
@@ -178,46 +385,69 @@ export const entryMethods = {
   },
 
   // 「说一句」解析结果一次入库，省得一条一条点。
-  quickAdd({ deviceId, entryId, chief, items }) {
+  // 先只读校验整批；任何一项非法都不改主诉、不 splice，最后才一次写入。
+  quickAdd({ deviceId, entryId, chief, items, assigneeId }) {
     const staff = this.requireStaff(deviceId)
     const entry = this.entryById(entryId)
+    let chiefChange = null
     if (chief?.targetId) {
       const target = targetById(chief.targetId)
       if (!target || !allowsChief(target)) fail(400, "这个位置不能当作要治的地方")
-      entry.chiefSiteId = chief.targetId
-      entry.chiefSide = normalizeSide(chief.side)
-      touchDiverged(entry)
+      chiefChange = {
+        chiefSiteId: chief.targetId,
+        // 本次没给合法侧时沿用这张单已有的合法侧，别把侧别静默清空。
+        chiefSide: normalizeSide(chief.side) || normalizeSide(entry.chiefSide),
+      }
     }
+    const nextChiefSiteId = chiefChange?.chiefSiteId || entry.chiefSiteId
+    const fallbackChiefSide = chiefChange ? chiefChange.chiefSide : normalizeSide(entry.chiefSide)
+    const incoming = Array.isArray(items) ? items : []
+    if (incoming.length && !nextChiefSiteId) fail(400, "请先点要治的地方，再加下手项")
+    if (!incoming.length && !chiefChange) fail(400, "没有可加的项")
+
     const previous = entry.items[entry.items.length - 1]
     const focus = focusOf(entry)
-    let added = 0
-    for (const item of Array.isArray(items) ? items : []) {
-      workTargetOrThrow(item?.targetId)
-      // 下手项必须先有要治的地方（本请求里刚设的也算）。
-      if (!entry.chiefSiteId) fail(400, "请先点要治的地方，再加下手项")
-      if (!TECHNIQUES.some((row) => row.id === item.technique)) fail(400, "手法不对")
-      if (!DIRECTIONS.some((row) => row.id === item.direction)) fail(400, "方向不对")
-      const dose = clampDose(item.technique, item.dose)
-      entry.items.push({
+    const unitUsage = equipmentUsageToday(this)
+    const prepared = []
+    for (const item of incoming) {
+      // 顶层 assigneeId 是整批默认派工；单项显式 assigneeId 仍可覆盖它。
+      const hasTopLevelAssignee = assigneeId !== undefined && assigneeId !== null && assigneeId !== ""
+      const input =
+        hasTopLevelAssignee && !Object.prototype.hasOwnProperty.call(item || {}, "assigneeId")
+          ? { ...item, assigneeId }
+          : item
+      const normalized = prepareNewItem({
+        store: this,
+        staff,
+        entry,
+        input,
+        previous,
+        fallbackTechnique: previous?.technique || "massage",
+        inheritPrevious: false,
+        options: { fallbackChiefSide, unitUsage },
+      })
+      if (normalized.equipmentUnitId) {
+        unitUsage[normalized.equipmentUnitId] = (unitUsage[normalized.equipmentUnitId] || 0) + 1
+      }
+      prepared.push({
         id: id(),
         conditionId: focus,
         sourceItemId: null,
-        targetId: item.targetId,
-        side: normalizeSide(item.side),
-        technique: item.technique,
-        direction: item.direction,
-        dose,
-        assigneeId: previous?.assigneeId || staff.id,
+        ...normalized,
         done: false,
         completedBy: null,
         completedAt: null,
       })
-      added += 1
     }
-    if (!added && !chief?.targetId) fail(400, "没有可加的项")
-    if (added) touchDiverged(entry)
+
+    if (chiefChange) {
+      entry.chiefSiteId = chiefChange.chiefSiteId
+      entry.chiefSide = chiefChange.chiefSide
+    }
+    entry.items.push(...prepared)
+    touchDiverged(entry)
     this.save()
-    this.audit(deviceId, "说一句加项", { 项数: added })
+    this.audit(deviceId, "说一句加项", { 项数: prepared.length })
     return this.entryView(deviceId, entry.id)
   },
 
@@ -293,6 +523,7 @@ export const entryMethods = {
           technique: item.technique,
           direction: item.direction,
           dose: structuredClone(item.dose),
+          ...equipmentFieldsOf(item),
           assigneeId: soloStaffId,
           done: false,
           completedBy: null,
@@ -362,37 +593,34 @@ export const entryMethods = {
     return this.entryView(deviceId, entry.id)
   },
 
-  addItem({ deviceId, entryId, targetId, side }) {
+  addItem({ deviceId, entryId, targetId, side, ...input }) {
     const staff = this.requireStaff(deviceId)
-    workTargetOrThrow(targetId)
     const entry = this.entryById(entryId)
     if (!entry.chiefSiteId) fail(400, "请先点要治的地方，再加下手项")
     const previous = entry.items[entry.items.length - 1]
-    const technique = previous?.technique || "massage"
-    const direction = previous?.direction || "along"
-    const dose = previous ? structuredClone(previous.dose) : defaultDose(technique)
-    if (technique === "equipment" && dose.minutes != null) {
-      Object.assign(dose, defaultDose("equipment"))
-      delete dose.minutes
-    }
-    const focus = focusOf(entry)
-    entry.items.push({
+    const prepared = prepareNewItem({
+      store: this,
+      staff,
+      entry,
+      input: { ...input, targetId, side },
+      previous,
+      fallbackTechnique: previous?.technique || "massage",
+      inheritPrevious: true,
+      options: { unitUsage: equipmentUsageToday(this) },
+    })
+    const item = {
       id: id(),
-      conditionId: focus,
+      conditionId: focusOf(entry),
       sourceItemId: null,
-      targetId,
-      side: normalizeSide(side),
-      technique,
-      direction,
-      dose,
-      assigneeId: previous?.assigneeId || staff.id,
+      ...prepared,
       done: false,
       completedBy: null,
       completedAt: null,
-    })
+    }
+    entry.items.push(item)
     touchDiverged(entry)
     this.save()
-    this.audit(deviceId, "点选一项", { 位置: targetTitle(targetId, normalizeSide(side)), 派给: staff.name })
+    this.audit(deviceId, "点选一项", { 位置: targetTitle(item.targetId, item.side), 派给: staff.name })
     return this.entryView(deviceId, entry.id)
   },
 
@@ -411,6 +639,13 @@ export const entryMethods = {
       const staysMinutes = item.technique !== "equipment" && patch.technique !== "equipment"
       item.technique = patch.technique
       if (!staysMinutes) item.dose = defaultDose(patch.technique)
+      if (patch.technique !== "equipment") {
+        item.equipmentTypeId = null
+        item.equipmentUnitId = null
+        item.exerciseTemplateId = null
+        item.parameters = {}
+        item.linkedTargets = []
+      }
       touched = true
     }
     if (patch.direction) {
@@ -425,7 +660,12 @@ export const entryMethods = {
       owner.lastAssigneeId = patch.assigneeId
     }
     if (Object.prototype.hasOwnProperty.call(patch, "side")) {
-      const side = normalizeSide(patch.side)
+      let side = normalizeSide(patch.side)
+      // 新写入的器械项不能把可侧化目标的侧别静默清成 null；旧数据仍可原样读取。
+      if (item.technique === "equipment" && hasSides(targetById(item.targetId))) {
+        side = side || normalizeSide(entry.chiefSide)
+        if (!side) fail(400, "请选择左侧或右侧")
+      }
       if (side !== (item.side || null)) touched = true
       item.side = side
     }
@@ -509,6 +749,7 @@ export const entryMethods = {
       technique,
       direction,
       dose,
+      ...equipmentFieldsOf(item),
       assigneeId: typeof item.assigneeId === "string" ? item.assigneeId : null,
       done: Boolean(item.done),
       completedBy: typeof item.completedBy === "string" ? item.completedBy : null,
@@ -580,6 +821,7 @@ export const entryMethods = {
       technique: item.technique,
       direction: item.direction,
       dose: structuredClone(item.dose),
+      ...equipmentFieldsOf(item),
     }))
     for (const [index, item] of mine.entries()) {
       item.sourceItemId = condition.items[index].id
@@ -629,6 +871,7 @@ export const entryMethods = {
         technique: item.technique,
         direction: item.direction,
         dose: structuredClone(item.dose),
+        ...equipmentFieldsOf(item),
         assigneeId: soloStaffId,
         done: false,
         completedBy: null,
@@ -691,6 +934,7 @@ export const entryMethods = {
         technique: item.technique,
         direction: item.direction,
         dose: structuredClone(item.dose),
+        ...equipmentFieldsOf(item),
       })),
     })
     this.save()

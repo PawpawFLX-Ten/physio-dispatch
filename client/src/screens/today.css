@@ -375,6 +375,143 @@
   font-size: 15px;
 }
 
+/* 按设备：沿用今日单卡片，但用三栏紧凑任务行，一眼扫完顺序、病人和归属。 */
+.today-equipment-group {
+  margin-bottom: 16px;
+}
+
+.today-equipment-title {
+  align-items: center;
+  gap: 10px;
+}
+
+.today-equipment-group-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.today-equipment-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.today-equipment-shared {
+  border-radius: 999px;
+  padding: 2px 8px;
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.today-equipment-list {
+  gap: 8px;
+}
+
+.today-equipment-task {
+  min-height: 68px;
+  padding: 9px 12px;
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 10px;
+  text-align: left;
+}
+
+.today-equipment-task:active {
+  background: var(--press);
+}
+
+.today-equipment-order {
+  display: grid;
+  place-items: center;
+  min-height: 30px;
+  border-radius: 8px;
+  background: var(--card-2);
+  color: var(--muted-2);
+  font-size: 14px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.today-equipment-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.today-equipment-patient {
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.today-equipment-target {
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.today-equipment-summary {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.today-equipment-linked {
+  color: var(--muted-2);
+  font-size: 13px;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.today-equipment-status {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.today-equipment-assignee {
+  color: var(--ink-list);
+  font-size: 14px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.today-equipment-assignee.is-unassigned {
+  color: var(--muted-2);
+  font-weight: 500;
+}
+
+.today-equipment-state {
+  border-radius: 999px;
+  padding: 2px 8px;
+  background: var(--card-2);
+  color: var(--muted-2);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.today-equipment-state.is-done {
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+
 .today-note {
   color: var(--danger-strong);
   font-size: 17px;
@@ -443,6 +580,107 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 设置页设备台账：默认折叠，只占一行，展开后按设备类型看机台。 */
+.settings-equipment-ledger {
+  margin-top: 18px;
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+}
+
+.settings-equipment-ledger > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+  list-style: none;
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.settings-equipment-ledger > summary::-webkit-details-marker {
+  display: none;
+}
+
+.settings-equipment-ledger > summary::before {
+  content: "▸";
+  color: var(--accent);
+  font-size: 17px;
+  line-height: 1;
+  transition: transform 160ms ease-out;
+}
+
+.settings-equipment-ledger[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.settings-equipment-summary-title {
+  margin-right: auto;
+}
+
+.settings-equipment-summary-meta {
+  color: var(--muted-2);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.settings-equipment-note {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.settings-equipment-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.settings-equipment-group {
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--card-2);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.settings-equipment-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.settings-equipment-name {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.settings-equipment-count,
+.settings-equipment-shared {
+  color: var(--muted-2);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.settings-equipment-shared {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.settings-equipment-units {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-equipment-ledger > summary::before { transition: none; }
 }
 
 /* 交班单：屏幕上不显示，打印时只出这一块 */

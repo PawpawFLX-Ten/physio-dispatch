@@ -73,9 +73,11 @@ const NUM = "([0-9]+|[一二两三四五六七八九十]{1,3})"
 // 把整句话变成记号流，再从左到右走一遍。
 // 手法/方向/剂量跟在肌肉名后面也认得（「股四头按摩八分钟」），会回头补到刚加的那项上，
 // 后面没说的沿用上一项（「腘绳肌松解，比目鱼肌」——比目鱼肌也是松解）。
-export function parseQuickOrder(text) {
+export function parseQuickOrder(text, options = {}) {
   const raw = String(text || "")
   const spans = []
+  const staff = Array.isArray(options.staff) ? options.staff : []
+  const equipment = Array.isArray(options.equipment) ? options.equipment : []
 
   function addAll(pattern, kind, map) {
     for (const match of raw.matchAll(pattern)) {
@@ -90,6 +92,24 @@ export function parseQuickOrder(text) {
       if (at < 0) break
       spans.push({ start: at, end: at + alias.length, kind: "target", value: targetId })
       from = at + alias.length
+    }
+  }
+  // 设备名也是封闭词表：由调用方传入设备目录及别名，解析器本身不硬编码设备知识。
+  const equipmentRows = equipment
+    .filter((row) => row && typeof row.id === "string")
+    .map((row) => ({
+      ...row,
+      aliases: [...new Set([row.name, ...(Array.isArray(row.aliases) ? row.aliases : [])].filter(Boolean))],
+    }))
+  for (const row of equipmentRows) {
+    for (const alias of row.aliases) {
+      let from = 0
+      for (;;) {
+        const at = raw.indexOf(String(alias), from)
+        if (at < 0) break
+        spans.push({ start: at, end: at + String(alias).length, kind: "equipment", value: row })
+        from = at + String(alias).length
+      }
     }
   }
   addAll(/按摩|揉捏|揉|推拿|按一按|按按|压一压|揉揉|推一推|按压/g, "technique", () => "massage")
@@ -112,6 +132,24 @@ export function parseQuickOrder(text) {
   addAll(/两侧|两边|双/g, "side", () => "both")
   addAll(/左/g, "side", () => "left")
   addAll(/右/g, "side", () => "right")
+  // 员工派工：只认明确前缀，避免病人名/普通词被误当成人名。
+  // 动态人名比固定词表更容易产生重叠，先按名字长度降序匹配。
+  const staffRows = staff
+    .filter((person) => person && typeof person.id === "string" && typeof person.name === "string" && person.name.trim())
+    .map((person) => ({ id: person.id, name: person.name.trim() }))
+    .sort((left, right) => right.name.length - left.name.length)
+  for (const person of staffRows) {
+    for (const prefix of ["派给", "交给", "给"]) {
+      const phrase = `${prefix}${person.name}`
+      let from = 0
+      for (;;) {
+        const at = raw.indexOf(phrase, from)
+        if (at < 0) break
+        spans.push({ start: at, end: at + phrase.length, kind: "assignee", value: person })
+        from = at + phrase.length
+      }
+    }
+  }
 
   // 同一个位置长的词优先（「肩胛提肌」不能拆成「肩」），重叠的丢掉。
   spans.sort((a, b) => a.start - b.start || b.end - b.start - (a.end - a.start))
@@ -143,9 +181,10 @@ export function parseQuickOrder(text) {
     }
   }
 
-  const sticky = { technique: "massage", direction: "along", dose: { minutes: 8 } }
+  const sticky = { technique: "massage", direction: "along", dose: { minutes: 8 }, equipmentTypeId: null }
   let pendingSide = null
   let chief = null
+  let assignee = null
   const items = []
   let groupStart = 0
 
@@ -156,7 +195,7 @@ export function parseQuickOrder(text) {
       if (!chief && allowsChief(target)) {
         // 「双侧」由两条左右分开的项表达，主诉不承载：存成不带侧，免得服务端静默丢掉。
         chief = { targetId: target.id, side: hasSides(target) && pendingSide !== "both" ? pendingSide : null }
-      } else if (target.kind !== "site") {
+      } else if (target.kind !== "site" || sticky.equipmentTypeId) {
         const sides = pendingSide === "both" ? ["left", "right"] : [pendingSide]
         groupStart = items.length
         for (const side of sides) {
@@ -165,17 +204,30 @@ export function parseQuickOrder(text) {
             side: hasSides(target) ? side : null,
             technique: sticky.technique,
             direction: sticky.direction,
+            equipmentTypeId: sticky.equipmentTypeId || null,
             dose: doseFor(sticky),
           })
         }
       }
-      // 说「左膝，股四头…」时左右会一直管到换了侧为止；「双侧」只管当次。
-      if (pendingSide === "both") pendingSide = null
+      // 说「左膝，股四头…」时左右会一直管到换了侧为止；「双侧」也持续生效。
     } else if (token.kind === "side") {
       pendingSide = token.value
+    } else if (token.kind === "assignee") {
+      assignee = token.value
+    } else if (token.kind === "equipment") {
+      sticky.technique = "equipment"
+      sticky.equipmentTypeId = token.value.id
+      // 新设备不带上一项的手工剂量；后面明确说了分钟/组次再覆盖。
+      sticky.dose = {}
+      for (let i = groupStart; i < items.length; i++) {
+        items[i].technique = "equipment"
+        items[i].equipmentTypeId = token.value.id
+        items[i].dose = doseFor(sticky)
+      }
     } else if (token.kind === "technique") {
       sticky.technique = token.value
       if (token.value === "equipment") sticky.dose = { sets: 3, reps: 10 }
+      if (token.value !== "equipment") sticky.equipmentTypeId = null
       applyToGroup(items, groupStart, "technique", token.value, sticky)
     } else if (token.kind === "direction") {
       sticky.direction = token.value
@@ -191,16 +243,53 @@ export function parseQuickOrder(text) {
     }
   }
 
-  return { chief, items, unknown: leftoverWords(raw, tokens) }
+  const equipmentById = new Map(equipmentRows.map((row) => [row.id, row]))
+  for (const item of items) {
+    if (!item.equipmentTypeId) continue
+    const type = equipmentById.get(item.equipmentTypeId)
+    const dose = item.dose || {}
+    const schemaKeys = new Set(
+      Array.isArray(type?.parameterSchema)
+        ? type.parameterSchema.map((field) => field?.key).filter(Boolean)
+        : [],
+    )
+    const parameters = {}
+    if (schemaKeys.size) {
+      for (const [key, value] of Object.entries(dose)) {
+        if (schemaKeys.has(key)) parameters[key] = value
+      }
+    } else if (item.equipmentTypeId === "shockwave" && dose.reps != null && dose.pulses == null) {
+      parameters.pulses = dose.reps
+    } else {
+      Object.assign(parameters, dose)
+    }
+    item.parameters = parameters
+  }
+
+  return {
+    chief,
+    items,
+    unknown: leftoverWords(raw, tokens),
+    assigneeId: assignee?.id || null,
+    assigneeName: assignee?.name || "",
+  }
 }
 
 function doseFor(sticky) {
+  // 已明确设备类型的项，参数由设备 schema 兜底；这里保留用户说出的原始分钟/组次，
+  // 避免超声/牵引等按分钟计的设备被通用的器械 3×10 规则改写。
+  if (sticky.technique === "equipment" && sticky.equipmentTypeId) return { ...(sticky.dose || {}) }
   return clampDose(sticky.technique, sticky.dose)
 }
 
 function mergeDose(sticky, dose) {
   if (dose.minutes != null) {
     sticky.dose = { minutes: dose.minutes }
+    return
+  }
+  // 冲击波口述里的「2000次」是脉冲次数，不补成 3 组。设备 schema 用 pulses。
+  if (sticky.equipmentTypeId === "shockwave" && dose.reps != null && dose.sets == null) {
+    sticky.dose = { pulses: Math.max(1, Number(dose.reps) || 1) }
     return
   }
   sticky.dose = {

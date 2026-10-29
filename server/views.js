@@ -1,5 +1,12 @@
 // 读侧：把 state 投影成各页面要的样子。
-import { targetById, targetTitle } from "../shared/catalog.js"
+import { sideLabel, targetById, targetTitle } from "../shared/catalog.js"
+import {
+  equipmentCatalogSnapshot,
+  equipmentSummaryForItem,
+  equipmentTypeById,
+  equipmentUnitName,
+  exerciseTemplateName,
+} from "../shared/equipment.js"
 import { mergedPairings } from "../shared/pairings.js"
 import { entryVersion, fail, todayKey, workSignature } from "./helpers.js"
 
@@ -14,12 +21,15 @@ export const viewMethods = {
       date: todayKey(),
     }
     if (base.stage !== "ready") return base
+    const equipmentCatalog = equipmentCatalogSnapshot()
     return {
       ...base,
       // 单人治疗室的界面差异（收起派工、行内完成口径）以服务端这份为准，别三处各算各的。
       solo: this.state.staff.length === 1,
       today: this.todayList(meId),
       todayByStaff: this.todayByStaff(),
+      todayByEquipment: this.todayByEquipment(),
+      ...equipmentCatalog,
       patients: this.patientList(),
       templates: this.templateList(),
       lastExportAt: typeof this.state.lastExportAt === "string" ? this.state.lastExportAt : null,
@@ -154,6 +164,7 @@ export const viewMethods = {
       mineDone: mine.filter((item) => item.done).length,
       mineNextId: mineNext?.id || null,
       mineNextName: mineNext ? targetTitle(mineNext.targetId, mineNext.side || null) : "",
+      equipmentCount: entry.items.filter((item) => item.technique === "equipment" || item.equipmentTypeId).length,
       // 来过几天就是第几次：直接从索引数，不用任何人手工记疗程次数。
       visitCount: this.visitCountOf(patient.id),
       version: entryVersion(entry),
@@ -215,6 +226,70 @@ export const viewMethods = {
     return list
   },
 
+  // 今日设备视图：按“设备类型 + 具体机台”分桶，但组内保留全局工作顺序。
+  // 旧 technique:"equipment" 但没有类型的数据归到 type=null 的“器械”桶，照样可读。
+  todayByEquipment() {
+    const groups = new Map()
+    let order = 0
+    for (const entry of this.todayRecord().entries) {
+      const patient = this.state.patients.find((item) => item.id === entry.patientId)
+      if (!patient) continue
+      for (const item of entry.items || []) {
+        order += 1
+        const type = equipmentTypeById(item.equipmentTypeId)
+        const isEquipment = item.technique === "equipment" || Boolean(type)
+        if (!isEquipment) continue
+        const typeName = type?.name || "器械"
+        const unitName = equipmentUnitName(item.equipmentUnitId)
+        const key = `${type?.id || "legacy"}:${item.equipmentUnitId || "none"}`
+        if (!groups.has(key)) {
+          groups.set(key, {
+            key,
+            equipmentTypeId: type?.id || null,
+            equipmentTypeName: typeName,
+            equipmentUnitId: typeof item.equipmentUnitId === "string" ? item.equipmentUnitId : null,
+            equipmentUnitName: unitName,
+            name: [typeName, unitName].filter(Boolean).join(" · "),
+            shared: Boolean(type && !type.requiresUnit),
+            done: 0,
+            total: 0,
+            tasks: [],
+          })
+        }
+        const group = groups.get(key)
+        const assignee = this.state.staff.find((person) => person.id === item.assigneeId)
+        const task = {
+          order,
+          entryId: entry.id,
+          itemId: item.id,
+          patientId: patient.id,
+          patientName: patient.name,
+          assigneeId: item.assigneeId || null,
+          assigneeName: assignee?.name || "",
+          done: Boolean(item.done),
+          completedAt: item.completedAt || null,
+          equipmentTypeId: type?.id || null,
+          equipmentTypeName: typeName,
+          equipmentUnitId: typeof item.equipmentUnitId === "string" ? item.equipmentUnitId : null,
+          equipmentUnitName: unitName,
+          equipmentSummary: equipmentSummaryForItem(item),
+          targetTitle: targetTitle(item.targetId, item.side || null),
+          linkedTargetTitles: (Array.isArray(item.linkedTargets) ? item.linkedTargets : [])
+            .map((link) => targetTitle(link.targetId, link.side || null))
+            .filter(Boolean),
+        }
+        group.tasks.push(task)
+        group.total += 1
+        if (item.done) group.done += 1
+      }
+    }
+    return [...groups.values()].map((group) => ({
+      ...group,
+      doneCount: group.done,
+      items: group.tasks,
+    }))
+  },
+
   patient(patientId) {
     const patient = this.state.patients.find((item) => item.id === patientId)
     if (!patient) fail(404, "找不到这个病人")
@@ -240,11 +315,25 @@ export const viewMethods = {
     const target = targetById(item.targetId)
     const assignee = this.state.staff.find((person) => person.id === item.assigneeId)
     const closer = this.state.staff.find((person) => person.id === item.completedBy)
+    const type = equipmentTypeById(item.equipmentTypeId)
+    const linkedTargets = Array.isArray(item.linkedTargets) ? structuredClone(item.linkedTargets) : []
     return {
       ...item,
       side: item.side || null,
+      parameters:
+        item.parameters && typeof item.parameters === "object" && !Array.isArray(item.parameters)
+          ? structuredClone(item.parameters)
+          : {},
+      linkedTargets,
       targetName: target?.name || item.targetId,
       targetKind: target?.kind || "muscle",
+      equipmentTypeName: type?.name || "",
+      equipmentUnitName: equipmentUnitName(item.equipmentUnitId),
+      exerciseName: exerciseTemplateName(item.exerciseTemplateId),
+      equipmentSummary: equipmentSummaryForItem(item),
+      equipmentDoseMode: type?.doseMode || null,
+      linkedTargetTitles: linkedTargets.map((link) => targetTitle(link.targetId, link.side || null)).filter(Boolean),
+      sideLabel: sideLabel(item.side || null),
       assigneeName: assignee?.name || "",
       completedBy: item.completedBy || null,
       completedAt: item.completedAt || null,

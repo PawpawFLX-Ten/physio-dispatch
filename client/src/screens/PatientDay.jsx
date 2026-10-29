@@ -4,6 +4,7 @@ import {
   DIRECTIONS,
   TECHNIQUES,
   allowsChief,
+  allowsEquipment,
   allowsWork,
   doseLabel,
   directionLabel,
@@ -15,6 +16,7 @@ import {
 import { itemsOnSpot } from "@shared/body-marks.js"
 import { useBackLayer } from "../back-layer.js"
 import { BodyStage } from "./BodyStage.jsx"
+import { EquipmentPicker } from "./patient/EquipmentPicker.jsx"
 import { ListPicker } from "./patient/ListPicker.jsx"
 import { DoseControl, PlanList } from "./patient/PlanList.jsx"
 import { Notice, Sheet } from "./patient/ui.jsx"
@@ -22,9 +24,13 @@ import {
   blankNotice,
   clockOf,
   conditionText,
+  equipmentParameterSummary,
   isConflictError,
+  isEquipmentItem,
   isPastMidnightError,
   itemSnapshot,
+  linkedTargetTitles,
+  normalizeQuickOrderSides,
   numeric,
   pastMidnightNotice,
 } from "./patient/helpers.js"
@@ -39,6 +45,10 @@ export function PatientDay({ entryId, initial, pulse, live = true, onBack }) {
   // 名单只有一个人时收起全部派工界面：项目自动记在那人名下（服务端本来就会这么派）。
   const solo = staff.length === 1
   const [templates, setTemplates] = useState([])
+  // 设备目录随每次 entryView 下发；选择器和操作卡都直接用服务端这份，避免客户端另存一份真相。
+  const [equipmentTypes, setEquipmentTypes] = useState([])
+  const [equipmentUnits, setEquipmentUnits] = useState([])
+  const [exerciseTemplates, setExerciseTemplates] = useState([])
   const [me, setMe] = useState(null)
   const [notice, setNotice] = useState(blankNotice)
   const [pastMidnight, setPastMidnight] = useState(false)
@@ -67,6 +77,9 @@ export function PatientDay({ entryId, initial, pulse, live = true, onBack }) {
   const [manageOpen, setManageOpen] = useState(false)
   const [moreOpen, setMoreOpen] = useState(false)
   const [bodyGroup, setBodyGroup] = useState(null)
+  // 手动模式保留原来的点一下直接加项；设备模式先弹选择器，确定设备/模板后才入库。
+  const [addMode, setAddMode] = useState("manual")
+  const [equipmentTarget, setEquipmentTarget] = useState(null)
   // 人体收起是本机偏好：开完单只看清单的人不用每次都等模型。
   const [modelTucked, setModelTucked] = useState(() => {
     try {
@@ -99,6 +112,7 @@ export function PatientDay({ entryId, initial, pulse, live = true, onBack }) {
       itemAssignId ||
       activeItemId ||
       bodyGroup ||
+      equipmentTarget ||
       copyOpen ||
       saveTmplOpen ||
       applyTmplOpen ||
@@ -125,6 +139,9 @@ export function PatientDay({ entryId, initial, pulse, live = true, onBack }) {
     if (result.staff) setStaff(result.staff)
     if (result.patients) setPatients(result.patients)
     if (result.templates) setTemplates(result.templates)
+    if (Array.isArray(result.equipmentTypes)) setEquipmentTypes(result.equipmentTypes)
+    if (Array.isArray(result.equipmentUnits)) setEquipmentUnits(result.equipmentUnits)
+    if (Array.isArray(result.exerciseTemplates)) setExerciseTemplates(result.exerciseTemplates)
     if (result.pairings) setPairings(result.pairings)
     if (Object.prototype.hasOwnProperty.call(result, "me")) setMe(result.me)
   }, [])
@@ -148,6 +165,8 @@ export function PatientDay({ entryId, initial, pulse, live = true, onBack }) {
     setItemAssignId(null)
     setActiveItemId(null)
     setBodyGroup(null)
+    setEquipmentTarget(null)
+    setAddMode("manual")
     setCopyOpen(false)
     setSaveTmplOpen(false)
     setApplyTmplOpen(false)
@@ -316,6 +335,7 @@ export function PatientDay({ entryId, initial, pulse, live = true, onBack }) {
           setCopyOpen(false)
           setActiveItemId(null)
           setBodyGroup(null)
+          setEquipmentTarget(null)
           setMoreOpen(false)
           setSaveTmplOpen(false)
           setApplyTmplOpen(false)
@@ -382,12 +402,37 @@ export function PatientDay({ entryId, initial, pulse, live = true, onBack }) {
     if (!entry) return
     const target = targetById(targetId)
     const pickedSide = hasSides(target) ? side || null : null
-    if (!entry.chiefSiteId || reselecting) {
+
+    // 无主诉时两种模式都沿用原语义：先定要治的位置。设备要作用在主诉区域时再点一次。
+    if (!entry.chiefSiteId) {
       if (!allowsChief(target)) return
       const ok = await mutate(() => api.setChief(entryId, targetId, pickedSide))
       if (ok) setReselecting(false)
       return
     }
+
+    // 设备模式先于 reselect/普通下手判断：膝/颈这类 equipmentCapable 主诉区域
+    // 也能作为设备作用目标，同一点击不再解释成“重选主诉”。
+    if (addMode === "equipment" && allowsEquipment(target)) {
+      if (hasSides(target) && !pickedSide) {
+        setNotice({ text: "这个部位需要明确的左侧或右侧，请从人体侧面点选", tone: "error" })
+        return
+      }
+      setNotice(blankNotice)
+      setReselecting(false)
+      closeSheets()
+      setEquipmentTarget({ targetId, side: pickedSide })
+      return
+    }
+
+    // 手动模式的 reselect：点了主诉之外的可当主诉目标，才改要治的位置。
+    if (reselecting) {
+      if (!allowsChief(target)) return
+      const ok = await mutate(() => api.setChief(entryId, targetId, pickedSide))
+      if (ok) setReselecting(false)
+      return
+    }
+
     if (targetId === entry.chiefSiteId) {
       if (hasSides(target) && pickedSide && pickedSide !== (entry.chiefSide || null)) {
         await mutate(() => api.setChief(entryId, targetId, pickedSide))
@@ -397,9 +442,11 @@ export function PatientDay({ entryId, initial, pulse, live = true, onBack }) {
       setReselecting(true)
       return
     }
+
+    // 普通下手仍只收 allowsWork；膝/颈不会因为 equipmentCapable 被塞进普通下手网格。
     if (allowsWork(target)) {
-      if (!entry.chiefSiteId) {
-        setNotice({ text: "先点要治的地方", tone: "error" })
+      if (hasSides(target) && !pickedSide) {
+        setNotice({ text: "这个部位需要明确的左侧或右侧，请从人体侧面点选", tone: "error" })
         return
       }
       const existing = itemsOnSpot(entry.items, targetId, pickedSide)
@@ -423,6 +470,7 @@ export function PatientDay({ entryId, initial, pulse, live = true, onBack }) {
     setItemAssignId(null)
     setActiveItemId(null)
     setBodyGroup(null)
+    setEquipmentTarget(null)
     setCopyOpen(false)
     setSaveTmplOpen(false)
     setApplyTmplOpen(false)
@@ -518,15 +566,37 @@ export function PatientDay({ entryId, initial, pulse, live = true, onBack }) {
 
   // 「说一句」的解析结果一次入库，面板留着继续说下一句。
   function quickAddParsed(parsed, afterSave) {
-    if (parsed.items.length && !parsed.chief && !entry?.chiefSiteId) {
+    // 解析器允许“没说侧别”，但器械项服务端是严格侧别；提交前统一把可侧化项落实成左/右。
+    const safeParsed = normalizeQuickOrderSides(parsed, {
+      chiefSide: entry?.chiefSide,
+      chiefSiteId: entry?.chiefSiteId,
+    })
+    if (safeParsed.items.length && !safeParsed.chief && !entry?.chiefSiteId) {
       setNotice({ text: "先点要治的地方", tone: "error" })
       return
     }
-    mutate(() => api.quickAdd(entryId, parsed), {
-      success: parsed.items.length ? `已加 ${parsed.items.length} 项` : "已记要治的地方",
+    // 显式带上整批派工和设备字段；items 里的 equipmentTypeId/parameters 原样交给服务端。
+    const payload = {
+      chief: safeParsed.chief,
+      items: safeParsed.items,
+      assigneeId: safeParsed.assigneeId || null,
+    }
+    mutate(() => api.quickAdd(entryId, payload), {
+      success: safeParsed.items.length ? `已加 ${safeParsed.items.length} 项` : "已记要治的地方",
       fail: "未能保存",
     }).then((ok) => {
       if (ok) afterSave?.()
+    })
+  }
+
+  // 设备/模板选择完成后只调用一次 addItem；服务端负责默认参数、自动机台和模板关联目标。
+  function addEquipmentChoice(extra, label) {
+    if (!equipmentTarget || pending) return
+    mutate(() => api.addItem(entryId, equipmentTarget.targetId, equipmentTarget.side, extra), {
+      success: `已加 ${label || "设备项"}`,
+      fail: "未能保存",
+    }).then((ok) => {
+      if (ok) setEquipmentTarget(null)
     })
   }
 
@@ -701,6 +771,7 @@ export function PatientDay({ entryId, initial, pulse, live = true, onBack }) {
     assignOpen ||
     Boolean(assignItem) ||
     Boolean(bodyGroup) ||
+    Boolean(equipmentTarget) ||
     copyOpen ||
     saveTmplOpen ||
     applyTmplOpen ||
@@ -712,6 +783,15 @@ export function PatientDay({ entryId, initial, pulse, live = true, onBack }) {
     moreOpen ||
     Boolean(activeItem) ||
     leaveAsk
+  const activeEquipmentType = activeItem
+    ? equipmentTypes.find((type) => type.id === activeItem.equipmentTypeId) || null
+    : null
+  const activeEquipment = Boolean(activeItem && isEquipmentItem(activeItem))
+  const activeParameterText = activeEquipment ? equipmentParameterSummary(activeItem, equipmentTypes) : ""
+  const activeLinkedTitles = activeEquipment ? linkedTargetTitles(activeItem) : []
+  const chiefTitle = entry.chiefSiteId
+    ? targetTitle(entry.chiefSiteId, hasSides(targetById(entry.chiefSiteId)) ? entry.chiefSide : null)
+    : ""
   const focusName = entryConditions.length
     ? (entryConditions.find((condition) => condition.id === entry.focusConditionId) || entryConditions[0]).name
     : ""
@@ -758,7 +838,7 @@ export function PatientDay({ entryId, initial, pulse, live = true, onBack }) {
       <div className={modelTucked ? "patient-stage is-tucked" : "patient-stage"}>
         {modelTucked ? (
           <div className="patient-stage-tucked">
-            <span>{entry.chiefSiteId ? `要治 ${targetTitle(entry.chiefSiteId, entry.chiefSide)}` : "人体已收起"}</span>
+            <span>{entry.chiefSiteId ? `要治 ${chiefTitle}` : "人体已收起"}</span>
             {/* 收起/展开是纯本地状态，不等保存：开单慢时也要能马上把清单放大。 */}
             <button type="button" className="secondary" onClick={() => setModelTucked(false)}>
               展开人体
@@ -785,7 +865,36 @@ export function PatientDay({ entryId, initial, pulse, live = true, onBack }) {
         {!entry.chiefSiteId && !reselecting ? (
           <p className="patient-hint">先点要治的地方，例如膝盖、腰、肩或颈。之后点的才是下手的肌肉或节点。</p>
         ) : null}
-        {entry.chiefSiteId ? <p className="patient-hint">要治 {targetTitle(entry.chiefSiteId, entry.chiefSide)}</p> : null}
+        {entry.chiefSiteId ? <p className="patient-hint">要治 {chiefTitle}</p> : null}
+        <div className="patient-mode-switch" role="group" aria-label="人体点选模式">
+          <button
+            type="button"
+            className={addMode === "manual" ? "patient-mode-btn is-on" : "patient-mode-btn"}
+            aria-pressed={addMode === "manual"}
+            disabled={pending}
+            onClick={() => {
+              setNotice(blankNotice)
+              setAddMode("manual")
+            }}
+          >
+            手动
+          </button>
+          <button
+            type="button"
+            className={addMode === "equipment" ? "patient-mode-btn is-on" : "patient-mode-btn"}
+            aria-pressed={addMode === "equipment"}
+            disabled={pending}
+            onClick={() => {
+              setNotice(blankNotice)
+              setAddMode("equipment")
+            }}
+          >
+            设备
+          </button>
+        </div>
+        {addMode === "equipment" ? (
+          <p className="patient-hint is-mode">设备模式：点人体部位（含主诉区域）选择设备；改主诉切回手动</p>
+        ) : null}
         {!covering ? <Notice notice={notice} /> : null}
         <PlanList
           items={entry.items || []}
@@ -1073,50 +1182,68 @@ export function PatientDay({ entryId, initial, pulse, live = true, onBack }) {
         >
           <Notice notice={notice} />
           <div className="patient-stack">
-            {bodyGroupItems.map((item, index) => (
-              <div key={item.id} className={item.done ? "patient-body-item is-done" : "patient-body-item"}>
-                <button
-                  type="button"
-                  className="patient-body-item-main"
-                  disabled={pending}
-                  onClick={() => {
-                    setActiveItemId(item.id)
-                    setBodyGroup(null)
-                  }}
-                >
-                  <span className="patient-body-item-title">
-                    {`${index + 1}. ${techniqueLabel(item.technique)} · ${directionLabel(item.direction)}`}
-                  </span>
-                  <span className="patient-body-item-meta">
-                    {[doseLabel(item.technique, item.dose), item.done ? "已完成" : ""]
-                      .filter(Boolean)
-                      .join(" · ")}
-                  </span>
-                </button>
-                {!solo ? (
+            {bodyGroupItems.map((item, index) => {
+              const equipment = isEquipmentItem(item)
+              const linked = linkedTargetTitles(item)
+              const detail = equipment
+                ? [
+                    item.equipmentSummary || "器械",
+                    item.exerciseName ? doseLabel("equipment", item.dose) : "",
+                    linked.length ? `关联 ${linked.join(" · ")}` : "",
+                    item.done ? "已完成" : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")
+                : [doseLabel(item.technique, item.dose), item.done ? "已完成" : ""].filter(Boolean).join(" · ")
+              return (
+                <div key={item.id} className={item.done ? "patient-body-item is-done" : "patient-body-item"}>
                   <button
                     type="button"
-                    className={item.assigneeId ? "patient-who" : "patient-who is-empty"}
+                    className="patient-body-item-main"
                     disabled={pending}
-                    aria-label={item.assigneeName ? `派给 ${item.assigneeName}` : "派给谁"}
-                    onClick={() => setItemAssignId(item.id)}
+                    onClick={() => {
+                      setActiveItemId(item.id)
+                      setBodyGroup(null)
+                    }}
                   >
-                    {item.assigneeName || "未派"}
+                    <span className="patient-body-item-title">
+                      {`${index + 1}. ${equipment ? item.exerciseName || item.equipmentTypeName || "器械" : `${techniqueLabel(item.technique)} · ${directionLabel(item.direction)}`}`}
+                    </span>
+                    <span className="patient-body-item-meta">{detail}</span>
                   </button>
-                ) : null}
-              </div>
-            ))}
+                  {!solo ? (
+                    <button
+                      type="button"
+                      className={item.assigneeId ? "patient-who" : "patient-who is-empty"}
+                      disabled={pending}
+                      aria-label={item.assigneeName ? `派给 ${item.assigneeName}` : "派给谁"}
+                      onClick={() => setItemAssignId(item.id)}
+                    >
+                      {item.assigneeName || "未派"}
+                    </button>
+                  ) : null}
+                </div>
+              )
+            })}
           </div>
           <button
             type="button"
             className="primary"
             disabled={pending}
-            onClick={() =>
+            onClick={() => {
+              // 同一点已经有设备项时，“再加一项”不能悄悄落成 legacy 器械；
+              // 改走设备选择器，让类型/机台/参数继续有真实来源。
+              if (addMode === "equipment" || bodyGroupItems.some(isEquipmentItem)) {
+                setNotice(blankNotice)
+                setBodyGroup(null)
+                setEquipmentTarget({ targetId: bodyGroup.targetId, side: bodyGroup.side })
+                return
+              }
               mutate(() => api.addItem(entryId, bodyGroup.targetId, bodyGroup.side), {
                 success: "已再加一项",
                 fail: "未能保存",
               })
-            }
+            }}
           >
             再加一项
           </button>
@@ -1172,6 +1299,36 @@ export function PatientDay({ entryId, initial, pulse, live = true, onBack }) {
       {activeItem && !leaveAsk ? (
         <Sheet title={targetTitle(activeItem.targetId, activeItem.side)} onClose={() => setActiveItemId(null)}>
           <Notice notice={notice} />
+          {activeEquipment ? (
+            <section className="patient-equipment-readonly" aria-label="设备信息，只读">
+              <p className="patient-equipment-readonly-title">设备信息 · 只读</p>
+              <dl>
+                <div>
+                  <dt>设备</dt>
+                  <dd>{activeItem.equipmentTypeName || activeEquipmentType?.name || activeItem.equipmentSummary || "器械"}</dd>
+                </div>
+                <div>
+                  <dt>机台</dt>
+                  <dd>
+                    {activeItem.equipmentUnitName ||
+                      (activeEquipmentType?.requiresUnit === false ? "共享设备，不占机台" : "自动安排")}
+                  </dd>
+                </div>
+                <div>
+                  <dt>模板</dt>
+                  <dd>{activeItem.exerciseName || "未使用动作模板"}</dd>
+                </div>
+                <div>
+                  <dt>参数</dt>
+                  <dd>{activeParameterText || "默认参数"}</dd>
+                </div>
+              </dl>
+              {activeLinkedTitles.length ? (
+                <p className="patient-equipment-linked">{`关联 ${activeLinkedTitles.join(" · ")}`}</p>
+              ) : null}
+              <p className="patient-equipment-readonly-hint">参数暂为只读；完成、改派、删除和下面的组次调整保持原有操作。</p>
+            </section>
+          ) : null}
           <p className="patient-label">手法</p>
           <div className="patient-techniques">
             {TECHNIQUES.map((technique) => (
@@ -1245,6 +1402,8 @@ export function PatientDay({ entryId, initial, pulse, live = true, onBack }) {
               </div>
             </>
           ) : null}
+          {!(activeEquipment && activeEquipmentType?.doseMode === "parameters") ? (
+            <>
           <p className="patient-label">剂量</p>
           <div className="patient-stack">
             {activeItem.technique === "equipment" ? (
@@ -1309,6 +1468,10 @@ export function PatientDay({ entryId, initial, pulse, live = true, onBack }) {
               />
             )}
           </div>
+            </>
+          ) : (
+            <p className="patient-equipment-dose-note">设备参数见上方只读摘要；组次剂量不适用于这类设备。</p>
+          )}
           <p className="patient-label">派给谁</p>
           <div className="patient-stack">
             {staff.map((person) => (
@@ -1401,6 +1564,9 @@ export function PatientDay({ entryId, initial, pulse, live = true, onBack }) {
         <ListPicker
           entry={entry}
           pairings={pairings}
+          staff={staff}
+          equipmentTypes={equipmentTypes}
+          exerciseTemplates={exerciseTemplates}
           pending={pending}
           notice={notice}
           query={listQuery}
@@ -1421,6 +1587,20 @@ export function PatientDay({ entryId, initial, pulse, live = true, onBack }) {
           }}
           onQuickAdd={quickAddParsed}
           onClose={() => setListOpen(false)}
+        />
+      ) : null}
+
+      {equipmentTarget && !leaveAsk ? (
+        <EquipmentPicker
+          targetId={equipmentTarget.targetId}
+          side={equipmentTarget.side}
+          equipmentTypes={equipmentTypes}
+          equipmentUnits={equipmentUnits}
+          exerciseTemplates={exerciseTemplates}
+          pending={pending}
+          notice={notice}
+          onAdd={addEquipmentChoice}
+          onClose={() => setEquipmentTarget(null)}
         />
       ) : null}
 

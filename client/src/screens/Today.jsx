@@ -22,6 +22,7 @@ export function Today({ snap, live, changedBy, onRefresh, onSnap, onOpen }) {
   const [settings, setSettings] = useState(false)
   const [mineOnly, setMineOnly] = useState(false)
   const [staffView, setStaffView] = useState(false)
+  const [equipmentView, setEquipmentView] = useState(false)
   const prevMineCount = useRef(null)
   const [query, setQuery] = useState("")
   const [templatePick, setTemplatePick] = useState(null)
@@ -122,6 +123,7 @@ export function Today({ snap, live, changedBy, onRefresh, onSnap, onOpen }) {
   const sameName = name.trim() ? patients.find((patient) => patient.name === name.trim()) : null
   const shownToday = mineOnly ? today.filter((entry) => (entry.mineTotal || 0) > 0) : today
   const byStaff = snap.todayByStaff || []
+  const byEquipment = snap.todayByEquipment || []
   // 病人多时今日单也能搜（和加入病人一个习惯：汉字/拼音首字母都行），人少时不占地方。
   const [todayQuery, setTodayQuery] = useState("")
   const filteredToday = useMemo(() => {
@@ -222,6 +224,14 @@ export function Today({ snap, live, changedBy, onRefresh, onSnap, onOpen }) {
   const hint = refreshing ? "正在刷新" : pull > 56 ? "松开刷新" : "下拉刷新"
   const who = [snap.date, snap.me?.name].filter(Boolean).join(" · ")
   const mineCount = today.reduce((sum, entry) => sum + (entry.mineTotal || 0) - (entry.mineDone || 0), 0)
+  const staffCount = snap.staff?.length || 0
+
+  // 四个视图只能亮一个：每次切换都明确关掉另外两个，避免出现“全部 + 按设备”同时选中。
+  function selectTodayView(nextView) {
+    setMineOnly(nextView === "mine")
+    setStaffView(nextView === "staff")
+    setEquipmentView(nextView === "equipment")
+  }
 
   function lastDayLabel(patient) {
     if (!patient.lastDay) return ""
@@ -288,54 +298,119 @@ export function Today({ snap, live, changedBy, onRefresh, onSnap, onOpen }) {
           <p className="today-offline" role="status">连接断了，正在重连…恢复后自动刷新</p>
         ) : null}
         {changedBy ? <p className="today-changedby" role="status">{`${changedBy} 刚改过，已更新`}</p> : null}
-        {/* 名单只有一个人时收起派工标签：没有「派给我的」「按人」，整栏都不要。 */}
-        {(snap.staff?.length || 0) > 1 ? (
-          <div className="today-tabs" role="tablist">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={!mineOnly && !staffView}
-              className={!mineOnly && !staffView ? "today-tab is-on" : "today-tab"}
-              onClick={() => {
-                setMineOnly(false)
-                setStaffView(false)
-              }}
-            >
-              全部
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={mineOnly}
-              className={mineOnly ? "today-tab is-on" : "today-tab"}
-              onClick={() => {
-                setMineOnly(true)
-                setStaffView(false)
-              }}
-            >
-              派给我的{mineCount ? ` ${mineCount}` : ""}
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={staffView}
-              className={staffView ? "today-tab is-on" : "today-tab"}
-              onClick={() => {
-                setStaffView(true)
-                setMineOnly(false)
-              }}
-            >
-              按人
-            </button>
-          </div>
-        ) : null}
+        {/* 单人治疗室仍需要「按设备」入口，但没有派工语义，所以只保留「全部」和「按设备」。 */}
+        <div className="today-tabs" role="tablist" aria-label="今日单视图">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={!mineOnly && !staffView && !equipmentView}
+            className={!mineOnly && !staffView && !equipmentView ? "today-tab is-on" : "today-tab"}
+            onClick={() => selectTodayView("all")}
+          >
+            全部
+          </button>
+          {staffCount > 1 ? (
+            <>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={mineOnly}
+                className={mineOnly ? "today-tab is-on" : "today-tab"}
+                onClick={() => selectTodayView("mine")}
+              >
+                派给我的{mineCount ? ` ${mineCount}` : ""}
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={staffView}
+                className={staffView ? "today-tab is-on" : "today-tab"}
+                onClick={() => selectTodayView("staff")}
+              >
+                按人
+              </button>
+            </>
+          ) : null}
+          <button
+            type="button"
+            role="tab"
+            aria-selected={equipmentView}
+            className={equipmentView ? "today-tab is-on" : "today-tab"}
+            onClick={() => selectTodayView("equipment")}
+          >
+            按设备
+          </button>
+        </div>
       </header>
       <div className="today-scroll" ref={scrollRef}>
         <div className="pull-label" style={{ height: shown }} aria-live="polite">
           {shown > 0 ? hint : ""}
         </div>
         <div className="today-shift" style={shown ? { transform: `translateY(${shown}px)` } : undefined}>
-          {staffView ? (
+          {equipmentView ? (
+            byEquipment.length === 0 ? (
+              <p className="today-empty">今天还没有设备任务</p>
+            ) : (
+              byEquipment.map((group) => {
+                const tasks = Array.isArray(group.items) ? group.items : group.tasks || []
+                const done = Number.isFinite(group.doneCount)
+                  ? group.doneCount
+                  : Number.isFinite(group.done)
+                    ? group.done
+                    : tasks.filter((task) => task.done).length
+                const total = Number.isFinite(group.total) ? group.total : tasks.length
+                const baseTitle =
+                  group.name ||
+                  [group.equipmentTypeName, group.equipmentUnitName].filter(Boolean).join(" · ") ||
+                  "器械"
+                // 正常契约里 name 已含机台；若服务端只给类型名，再补上 unit，避免设备重名。
+                const title = group.equipmentUnitName && !baseTitle.includes(group.equipmentUnitName)
+                  ? `${baseTitle} · ${group.equipmentUnitName}`
+                  : baseTitle
+                return (
+                  <section key={group.key || group.equipmentUnitId || group.equipmentTypeId} className="today-group today-equipment-group">
+                    <h2 className="today-group-title today-equipment-title">
+                      <span className="today-equipment-group-name">{title}</span>
+                      <span className="today-equipment-meta">
+                        {group.shared ? <span className="today-equipment-shared">共享</span> : null}
+                        <span className="today-group-count">{`${done}/${total}`}</span>
+                      </span>
+                    </h2>
+                    <div className="today-list today-equipment-list">
+                      {tasks.map((task) => (
+                        <button
+                          key={task.itemId || `${task.entryId}-${task.order}`}
+                          type="button"
+                          className="row-btn today-equipment-task"
+                          onClick={() => onOpen(task.entryId)}
+                        >
+                          <span className="today-equipment-order" aria-label={`顺序 ${task.order}`}>
+                            {task.order ?? "·"}
+                          </span>
+                          <span className="today-equipment-body">
+                            <span className="today-equipment-patient">{task.patientName}</span>
+                            {task.targetTitle ? <span className="today-equipment-target">{task.targetTitle}</span> : null}
+                            <span className="today-equipment-summary">{task.equipmentSummary || title}</span>
+                            {task.linkedTargetTitles?.length ? (
+                              <span className="today-equipment-linked">{task.linkedTargetTitles.join("、")}</span>
+                            ) : null}
+                          </span>
+                          <span className="today-equipment-status">
+                            <span className={task.assigneeName ? "today-equipment-assignee" : "today-equipment-assignee is-unassigned"}>
+                              {task.assigneeName || "未派"}
+                            </span>
+                            <span className={task.done ? "today-equipment-state is-done" : "today-equipment-state"}>
+                              {task.done ? "已完成" : "未完成"}
+                            </span>
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+                )
+              })
+            )
+          ) : staffView ? (
             byStaff.length === 0 ? (
               <p className="today-empty">今天还没有病人</p>
             ) : (
@@ -370,7 +445,7 @@ export function Today({ snap, live, changedBy, onRefresh, onSnap, onOpen }) {
             </p>
           ) : (
             <div className="today-list">
-              {!staffView && today.length >= 8 ? (
+              {!equipmentView && !staffView && today.length >= 8 ? (
                 <input
                   className="today-search today-filter"
                   type="search"

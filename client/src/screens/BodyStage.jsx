@@ -65,9 +65,16 @@ function loadBodyFile(file) {
   return pending
 }
 
+// BodyParts3D 正面朝观察者：x<0 是患者右侧，x>0 是患者左侧。
 function sideOf(point, targetId) {
   if (!hasSides(targetById(targetId))) return null
-  return point.x >= 0 ? "right" : "left"
+  return point.x < 0 ? "right" : "left"
+}
+
+function oppositeSide(side) {
+  if (side === "left") return "right"
+  if (side === "right") return "left"
+  return null
 }
 
 function restingColor(targetId, tissue) {
@@ -398,7 +405,7 @@ export function BodyStage({ chiefSiteId, chiefSide, items, reselecting, onSelect
       }
       const footBySide = new Map()
       for (const box of footBoxes) {
-        const side = box.getCenter(new Vector3()).x >= 0 ? "right" : "left"
+        const side = sideOf(box.getCenter(new Vector3()), "plantar")
         const union = footBySide.get(side) || new Box3()
         union.union(box)
         footBySide.set(side, union)
@@ -507,15 +514,25 @@ export function BodyStage({ chiefSiteId, chiefSide, items, reselecting, onSelect
         list.push(...points)
         byId.set(id, list)
       }
+      // picks 是吸附用的确定性锚点：可侧化目标优先取患者左侧，并把锚点自己的
+      // 患者侧别显式留在数据里。镜像吸附会据此取对侧，绝不从镜像后的 x 再猜。
       for (const { id } of TARGETS) {
         const points = byId.get(id)
         if (!points?.length) continue
-        const right = points.filter((point) => point.x >= -0.01)
-        const used = right.length ? right : points
+        const target = targetById(id)
+        const anchorSide = hasSides(target)
+          ? anchors.has(markKey(id, "left"))
+            ? "left"
+            : anchors.has(markKey(id, "right"))
+              ? "right"
+              : sideOf(points[0], id)
+          : null
+        const sidePoints = anchorSide ? anchors.get(markKey(id, anchorSide)) : null
+        const used = sidePoints?.length ? sidePoints : points
         const anchor = new Vector3()
         for (const point of used) anchor.add(point)
         anchor.multiplyScalar(1 / used.length)
-        picks[id] = roundPoint(anchor)
+        picks[id] = { ...roundPoint(anchor), side: anchorSide }
       }
       pickAnchors = picks
       view.dataset.picks = JSON.stringify(picks)
@@ -638,22 +655,29 @@ export function BodyStage({ chiefSiteId, chiefSide, items, reselecting, onSelect
         const rect = renderer.domElement.getBoundingClientRect()
         const v = new Vector3()
         let best = null
-        for (const [id, point] of Object.entries(pickAnchors)) {
+        // 锚点存在 figure 局部坐标里；背面视图旋转过，投影前必须带入当前人体矩阵。
+        figure.updateWorldMatrix(true, false)
+        for (const [id, pick] of Object.entries(pickAnchors)) {
           if (dimmedMaterials.has(materialByTarget.get(id))) continue
           const target = targetById(id)
           if (!target) continue
-          const bothSides = hasSides(target)
-          const spots = bothSides ? [point, { x: -point.x, y: point.y, z: point.z }] : [point]
-          spots.forEach((spot, index) => {
-            v.set(spot.x, spot.y, spot.z).project(camera)
-            if (v.z < -1 || v.z > 1) return
+          const baseSide = hasSides(target) ? pick.side || sideOf(pick, id) : null
+          // 原始锚点和镜像点各自带明确患者侧；镜像侧只由原始侧取反得到。
+          const spots = baseSide
+            ? [
+                { x: pick.x, y: pick.y, z: pick.z, side: baseSide },
+                { x: -pick.x, y: pick.y, z: pick.z, side: oppositeSide(baseSide) },
+              ]
+            : [{ x: pick.x, y: pick.y, z: pick.z, side: null }]
+          for (const spot of spots) {
+            v.set(spot.x, spot.y, spot.z).applyMatrix4(figure.matrixWorld).project(camera)
+            if (v.z < -1 || v.z > 1) continue
             const sx = rect.left + rect.width * (0.5 + v.x / 2)
             const sy = rect.top + rect.height * (0.5 - v.y / 2)
             const dist = Math.hypot(sx - clientX, sy - clientY)
-            if (dist >= 14 || (best && dist >= best.dist)) return
-            const rightSide = index === 0 ? spot.x >= 0 : spot.x < 0
-            best = { dist, targetId: id, side: bothSides ? (rightSide ? "right" : "left") : null }
-          })
+            if (dist >= 14 || (best && dist >= best.dist)) continue
+            best = { dist, targetId: id, side: spot.side }
+          }
         }
         return best ? { targetId: best.targetId, hit: null, side: best.side } : null
       }
