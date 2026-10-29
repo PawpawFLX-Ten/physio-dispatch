@@ -1,7 +1,7 @@
 // 今日单条目清单：滑动删除、拖动排序、当前项标记、行内完成。
 import { useEffect, useRef, useState } from "react"
 import { targetTitle } from "@shared/catalog.js"
-import { isEquipmentItem, itemLine, linkedTargetTitles, originElement, removePast, sameIds, stepsFrom } from "./helpers.js"
+import { isEquipmentInUse, isEquipmentItem, itemLine, linkedTargetTitles, originElement, removePast, sameIds, stepsFrom } from "./helpers.js"
 
 export function TreatmentRow({ item, index, current, solo, dragging, offsetY, swipeX, onToggle, onAssign, onRowPointerDown, onHandlePointerDown }) {
   const transform = dragging
@@ -9,10 +9,11 @@ export function TreatmentRow({ item, index, current, solo, dragging, offsetY, sw
     : swipeX
       ? `translate3d(${swipeX}px, 0, 0)`
       : undefined
-  const rowClass = ["patient-row", item.done ? "is-done" : "", current ? "is-current" : "", dragging ? "is-dragging" : ""]
+  const equipment = isEquipmentItem(item)
+  const inUse = isEquipmentInUse(item)
+  const rowClass = ["patient-row", item.done ? "is-done" : "", current ? "is-current" : "", dragging ? "is-dragging" : "", inUse ? "is-in-use" : ""]
     .filter(Boolean)
     .join(" ")
-  const equipment = isEquipmentItem(item)
   // 设备摘要由服务端统一拼接设备/机台/参数；组次型设备也已在摘要里带剂量，避免重复。
   const cardDetail = equipment && item.equipmentSummary ? item.equipmentSummary : itemLine(item)
   const linkedTitles = linkedTargetTitles(item)
@@ -32,6 +33,11 @@ export function TreatmentRow({ item, index, current, solo, dragging, offsetY, sw
             <span className="patient-target">{targetTitle(item.targetId, item.side)}</span>
           </div>
           {linkedTitles.length ? <p className="patient-row-linked">{`关联 ${linkedTitles.join(" · ")}`}</p> : null}
+          {inUse ? (
+            <p className="patient-row-in-use">
+              <span className="patient-in-use-badge">使用中</span>
+            </p>
+          ) : null}
           <p className={equipment ? "patient-meta is-equipment" : "patient-meta"}>{cardDetail}</p>
         </div>
         {!solo ? (

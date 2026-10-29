@@ -90,6 +90,18 @@ export function isEquipmentItem(item) {
   return Boolean(item && (item.technique === "equipment" || item.equipmentTypeId || item.exerciseTemplateId))
 }
 
+export function isEquipmentInUse(item) {
+  return Boolean(isEquipmentItem(item) && !item?.done && item?.startedAt)
+}
+
+// 使用中状态的第二行：谁在几点开始。时间为空时只显示使用人，不编造时刻。
+export function equipmentStartedText(item) {
+  if (!item?.startedAt) return ""
+  const who = item.startedByName || "使用人未知"
+  const at = clockOf(item.startedAt)
+  return at ? `${who} · ${at}` : who
+}
+
 function findEquipmentType(item, equipmentTypes) {
   return (equipmentTypes || []).find((type) => type?.id === item?.equipmentTypeId) || null
 }

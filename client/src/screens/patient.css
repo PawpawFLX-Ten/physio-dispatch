@@ -1025,3 +1025,89 @@
   font-size: 14px;
   font-weight: 700;
 }
+
+/* 设备开始/结束使用：编辑区和任务卡共用同一枚使用中徽标。 */
+.patient-equipment-usage {
+  margin: 12px 0 16px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--card);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.patient-equipment-usage.is-running {
+  background: var(--accent-bg);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.patient-equipment-usage .patient-label {
+  margin-bottom: 6px;
+  font-size: 15px;
+}
+
+.patient-equipment-usage-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.patient-equipment-usage-copy {
+  min-width: 0;
+}
+
+.patient-equipment-usage-state {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.45;
+}
+
+.patient-equipment-usage-unit {
+  margin: 3px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.patient-equipment-usage-start {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.patient-day .patient-equipment-usage-btn {
+  width: auto;
+  min-height: 48px;
+  padding: 0 16px;
+  white-space: nowrap;
+}
+
+.patient-day .patient-equipment-usage-start .patient-equipment-usage-btn {
+  width: 100%;
+}
+
+.patient-in-use-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--bg);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.patient-row-in-use {
+  margin: 4px 0 1px;
+}
+
+.patient-row.is-in-use .patient-row-main {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}

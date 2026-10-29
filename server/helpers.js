@@ -135,6 +135,21 @@ export function bumpEntryVersion(entry) {
   entry.version = entryVersion(entry) + 1
 }
 
+// startedAt/startedBy 是一对运行时锁：完成项、非法时间、非名单员工都不能留下半把锁。
+// 旧数据没有这两个字段时显式补 null，读侧不用再猜 undefined。
+export function sanitizeStartedFields(item, staffIds = null) {
+  const done = Boolean(item?.done)
+  const rawStartedAt = typeof item?.startedAt === "string" && item.startedAt ? item.startedAt : null
+  const startedAt =
+    !done && rawStartedAt && Number.isFinite(Date.parse(rawStartedAt)) ? rawStartedAt : null
+  const rawStartedBy =
+    !done && typeof item?.startedBy === "string" && item.startedBy
+      ? item.startedBy
+      : null
+  const startedBy = rawStartedBy && (!staffIds || staffIds.has(rawStartedBy)) ? rawStartedBy : null
+  return startedAt && startedBy ? { startedAt, startedBy } : { startedAt: null, startedBy: null }
+}
+
 function sanitizeStaff(person) {
   if (!person || typeof person !== "object") return null
   if (typeof person.id !== "string" || !person.id || typeof person.name !== "string" || !person.name.trim()) return null
@@ -200,6 +215,7 @@ export function sanitizeDayEntry(entry, staffIds) {
       .map((item) => {
         const technique = TECHNIQUES.some((row) => row.id === item.technique) ? item.technique : "massage"
         const direction = DIRECTIONS.some((row) => row.id === item.direction) ? item.direction : "along"
+        const done = Boolean(item.done)
         return {
           id: typeof item.id === "string" && item.id ? item.id : id(),
           conditionId: typeof item.conditionId === "string" ? item.conditionId : null,
@@ -210,9 +226,10 @@ export function sanitizeDayEntry(entry, staffIds) {
           direction,
           dose: clampDose(technique, item.dose),
           assigneeId: typeof item.assigneeId === "string" && staffIds.has(item.assigneeId) ? item.assigneeId : null,
-          done: Boolean(item.done),
+          done,
           completedBy: typeof item.completedBy === "string" ? item.completedBy : null,
-          completedAt: item.done && typeof item.completedAt === "string" ? item.completedAt : null,
+          completedAt: done && typeof item.completedAt === "string" ? item.completedAt : null,
+          ...sanitizeStartedFields({ ...item, done }, staffIds),
           ...sanitizeItemEquipment(item, technique),
         }
       }),
@@ -286,6 +303,9 @@ export function sanitizeState(data) {
 export function normalizeLoadedState(data) {
   if (!data || typeof data !== "object" || Array.isArray(data)) return null
   if (!Array.isArray(data.staff) || !Array.isArray(data.patients)) return null
+  const staffIds = new Set(
+    data.staff.filter((row) => row && typeof row.id === "string" && row.id).map((row) => row.id),
+  )
   const days = {}
   if (data.days && typeof data.days === "object" && !Array.isArray(data.days)) {
     for (const [key, day] of Object.entries(data.days)) {
@@ -300,7 +320,11 @@ export function normalizeLoadedState(data) {
             items: Array.isArray(entry.items)
               ? entry.items
                   .filter((row) => row && typeof row === "object")
-                  .map((row) => ({ ...row, ...sanitizeItemEquipment(row, row.technique) }))
+                  .map((row) => ({
+                    ...row,
+                    ...sanitizeStartedFields(row, staffIds),
+                    ...sanitizeItemEquipment(row, row.technique),
+                  }))
               : [],
           })),
       }

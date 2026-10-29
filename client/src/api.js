@@ -128,6 +128,9 @@ export const api = {
       method: "POST",
       body: { assigneeId, ...(expectedVersion != null ? { expectedVersion } : {}) },
     }),
+  // 跨病人把某人今天的未完成项整批移交；设备使用中的锁会在移交时释放。
+  reassignOpen: (fromStaffId, toStaffId) =>
+    request("/api/today/reassign-open", { method: "POST", body: { fromStaffId, toStaffId } }),
   includeCondition: (id, conditionId) => request(`/api/entries/${id}/include`, { method: "POST", body: { conditionId } }),
   setFocus: (id, conditionId) => request(`/api/entries/${id}/focus`, { method: "POST", body: { conditionId } }),
   dropEntry: (id) => request(`/api/entries/${id}/drop`, { method: "POST", body: {} }),

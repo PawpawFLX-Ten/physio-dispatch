@@ -317,6 +317,72 @@ try {
   }
   console.log("7 今日单全局吩咐入口：通过")
 
+  // 为真实设备锁补两项同机台超声任务，均派给当前医生。
+  const staffRows = afterCommand.staff || []
+  const doctor = staffRows.find((person) => person.name === "之之")
+  if (!doctor) throw new Error("找不到当前医生")
+  await post(`/api/entries/${patient.entry.id}/items`, {
+    targetId: "gastroc",
+    side: "left",
+    equipmentTypeId: "ultrasound",
+    equipmentUnitId: "ultrasound-2",
+    assigneeId: doctor.id,
+  })
+  await post(`/api/entries/${patient.entry.id}/items`, {
+    targetId: "soleus",
+    side: "left",
+    equipmentTypeId: "ultrasound",
+    equipmentUnitId: "ultrasound-2",
+    assigneeId: doctor.id,
+  })
+  await page.reload({ waitUntil: "load" })
+  await waitText(page, ["今日单", "我的任务"])
+  await page.locator(".today-tab").filter({ hasText: "我的任务" }).click()
+  await waitText(page, ["我的任务", "开始设备", "左腓肠肌", "左比目鱼肌"])
+  const firstDeviceRow = page.locator(".today-my-wrap").filter({ hasText: "左腓肠肌" })
+  const secondDeviceRow = page.locator(".today-my-wrap").filter({ hasText: "左比目鱼肌" })
+  await firstDeviceRow.getByRole("button", { name: "开始设备", exact: true }).click()
+  await waitText(page, ["使用中"])
+  await secondDeviceRow.getByRole("button", { name: "开始设备", exact: true }).click()
+  await waitText(page, ["正在被", "请先结束"])
+  if (!(await secondDeviceRow.innerText()).includes("未开始")) throw new Error("冲突设备任务不应被标记使用中")
+  await firstDeviceRow.getByRole("button", { name: "结束设备", exact: true }).click()
+  await waitText(page, ["未开始"])
+  await secondDeviceRow.getByRole("button", { name: "开始设备", exact: true }).click()
+  await waitText(page, ["使用中"])
+  await secondDeviceRow.getByRole("button", { name: "完成", exact: true }).click()
+  await secondDeviceRow.waitFor({ state: "detached" })
+  console.log("8 我的任务队列与设备真实开始/冲突/结束/完成释放：通过")
+
+  // 将医生的未完成项跨病人整批移交给小李；设备使用中的锁必须释放。
+  const shockwaveRow = page.locator(".today-my-wrap").filter({ hasText: "冲击波" }).first()
+  await shockwaveRow.getByRole("button", { name: "开始设备", exact: true }).click()
+  await waitText(page, ["使用中"])
+  const beforeHandoff = JSON.parse(fs.readFileSync(path.join(dataDir, "clinic.json"), "utf8"))
+  const startedBeforeHandoff = Object.values(beforeHandoff.days)
+    .flatMap((day) => day.entries)
+    .flatMap((entry) => entry.items)
+    .find((item) => item.equipmentTypeId === "shockwave" && item.startedAt)
+  if (!startedBeforeHandoff) throw new Error("移交前冲击波没有建立使用锁")
+  await page.locator(".today-tab").filter({ hasText: "按人" }).click()
+  await waitText(page, ["按人", "移交"])
+  const doctorGroup = page.locator(".today-group").filter({ hasText: "之之" })
+  await doctorGroup.getByRole("button", { name: /移交 \d+ 项/ }).click()
+  await waitText(page, ["移交任务", "小李"])
+  await page.locator(".today-handoff-person").filter({ hasText: "小李" }).click()
+  await waitText(page, ["已移交"])
+  const afterHandoff = JSON.parse(fs.readFileSync(path.join(dataDir, "clinic.json"), "utf8"))
+  const afterEntryForHandoff = Object.values(afterHandoff.days).flatMap((day) => day.entries).find((row) => row.id === patient.entry.id)
+  const doctorAfter = afterHandoff.staff.find((person) => person.name === "之之")
+  const aide = afterHandoff.staff.find((person) => person.name === "小李")
+  const stillDoctorOpen = afterEntryForHandoff.items.filter((item) => !item.done && item.assigneeId === doctorAfter.id)
+  if (stillDoctorOpen.length) throw new Error(`移交后仍有医生未完成项 ${stillDoctorOpen.length}`)
+  if (!afterEntryForHandoff.items.some((item) => !item.done && item.assigneeId === aide.id)) throw new Error("移交后目标员工没有未完成项")
+  if (afterEntryForHandoff.items.some((item) => !item.done && item.assigneeId === aide.id && item.startedAt)) {
+    throw new Error("移交后仍残留设备锁")
+  }
+  console.log("9 跨病人一键移交并释放设备锁：通过")
+
   if (pageErrors.length) throw new Error(`页面异常：${pageErrors.join(" | ")}`)
   console.log("EQUIPMENT_E2E_OK")
 } finally {

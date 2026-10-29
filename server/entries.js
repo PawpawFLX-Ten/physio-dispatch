@@ -64,6 +64,20 @@ function equipmentUsageToday(store, skipItemId = null) {
   return usage
 }
 
+// 真实占用只看“未完成且已 started”的任务；同一项自己不算冲突。
+function activeEquipmentConflict(store, unitId, skipItemId) {
+  if (!unitId) return null
+  for (const entry of store.todayRecord().entries || []) {
+    for (const item of entry.items || []) {
+      if (!item || item.id === skipItemId || item.done || item.equipmentUnitId !== unitId) continue
+      if (typeof item.startedAt !== "string" || !item.startedAt) continue
+      const patient = store.state.patients.find((person) => person.id === entry.patientId) || null
+      return { item, entry, patient }
+    }
+  }
+  return null
+}
+
 function resolveSide(target, requestedSide, fallbackSide, strict) {
   let side = normalizeSide(requestedSide) || normalizeSide(fallbackSide)
   if (!hasSides(target)) side = null
@@ -221,6 +235,8 @@ function prepareNewItem({ store, staff, entry, input, previous, fallbackTechniqu
     exerciseTemplateId: template?.id || null,
     parameters,
     linkedTargets,
+    startedAt: null,
+    startedBy: null,
   }
 }
 
@@ -318,6 +334,8 @@ export const entryMethods = {
         done: false,
         completedBy: null,
         completedAt: null,
+        startedAt: null,
+        startedBy: null,
       })),
     }
     this.day().entries.push(entry)
@@ -377,6 +395,8 @@ export const entryMethods = {
         done: false,
         completedBy: null,
         completedAt: null,
+        startedAt: null,
+        startedBy: null,
       })),
     }
     this.day().entries.push(entry)
@@ -438,6 +458,8 @@ export const entryMethods = {
         done: false,
         completedBy: null,
         completedAt: null,
+        startedAt: null,
+        startedBy: null,
       })
     }
 
@@ -529,6 +551,8 @@ export const entryMethods = {
           done: false,
           completedBy: null,
           completedAt: null,
+          startedAt: null,
+          startedBy: null,
         })
       }
     }
@@ -617,6 +641,8 @@ export const entryMethods = {
       done: false,
       completedBy: null,
       completedAt: null,
+      startedAt: null,
+      startedBy: null,
     }
     entry.items.push(item)
     touchDiverged(entry)
@@ -632,41 +658,58 @@ export const entryMethods = {
     if (!patch || typeof patch !== "object" || Array.isArray(patch)) fail(400, "改动格式不对")
     const item = entry.items.find((row) => row.id === itemId)
     if (!item) fail(404, "找不到这一项")
-    // 只在改到会写回病症的字段（手法/方向/剂量/侧）时才重新问「记回病症」；
-    // 完成和改派不碰存档，答过的不用再答。
+
+    if (hasOwn(patch, "started") && typeof patch.started !== "boolean") fail(400, "开始状态格式不对")
+    if (hasOwn(patch, "technique") && !TECHNIQUES.some((row) => row.id === patch.technique)) {
+      fail(400, "手法不对")
+    }
+    const nextTechnique = hasOwn(patch, "technique") ? patch.technique : item.technique
+    if (hasOwn(patch, "started") && nextTechnique !== "equipment") {
+      fail(400, "只有设备项可以开始或结束使用")
+    }
+    const nextDone = typeof patch.done === "boolean" ? patch.done : Boolean(item.done)
+    if (patch.started === true && nextDone) fail(409, "已完成的任务不能开始使用")
+
+    // 所有改动先落在副本上，最后才一次性提交；任何校验失败都不留下半改状态。
+    const candidate = structuredClone(item)
     let touched = false
-    if (patch.technique && patch.technique !== item.technique) {
-      if (!TECHNIQUES.some((row) => row.id === patch.technique)) fail(400, "手法不对")
-      // 按摩↔松解都按分钟计：换手法不丢调好的时长；只有换成/换出器械才重置成默认组次。
-      const staysMinutes = item.technique !== "equipment" && patch.technique !== "equipment"
-      item.technique = patch.technique
-      if (!staysMinutes) item.dose = defaultDose(patch.technique)
-      if (patch.technique !== "equipment") {
-        item.equipmentTypeId = null
-        item.equipmentUnitId = null
-        item.exerciseTemplateId = null
-        item.parameters = {}
-        item.linkedTargets = []
+    let patientAssigneeId = null
+
+    if (hasOwn(patch, "technique") && candidate.technique !== patch.technique) {
+      // 按摩↔松解↔牵伸都按分钟计：换手法不丢调好的时长；只有换成/换出器械才重置成默认组次。
+      const staysMinutes = candidate.technique !== "equipment" && patch.technique !== "equipment"
+      candidate.technique = patch.technique
+      if (!staysMinutes) candidate.dose = defaultDose(patch.technique)
+      if (candidate.technique !== "equipment") {
+        candidate.equipmentTypeId = null
+        candidate.equipmentUnitId = null
+        candidate.exerciseTemplateId = null
+        candidate.parameters = {}
+        candidate.linkedTargets = []
+        candidate.startedAt = null
+        candidate.startedBy = null
       }
       touched = true
     }
+
     if (hasOwn(patch, "parameters")) {
-      if (item.technique !== "equipment") fail(400, "只有设备项可以改设备参数")
+      if (candidate.technique !== "equipment") fail(400, "只有设备项可以改设备参数")
       if (!patch.parameters || typeof patch.parameters !== "object" || Array.isArray(patch.parameters)) {
         fail(400, "设备参数格式不对")
       }
-      const type = equipmentTypeById(item.equipmentTypeId)
+      const type = equipmentTypeById(candidate.equipmentTypeId)
       const merged = {
-        ...(item.parameters && typeof item.parameters === "object" ? item.parameters : {}),
+        ...(candidate.parameters && typeof candidate.parameters === "object" ? candidate.parameters : {}),
         ...patch.parameters,
       }
       const nextParameters = sanitizeEquipmentParameters(type?.id || null, merged)
-      if (JSON.stringify(nextParameters) !== JSON.stringify(item.parameters || {})) touched = true
-      item.parameters = nextParameters
+      if (JSON.stringify(nextParameters) !== JSON.stringify(candidate.parameters || {})) touched = true
+      candidate.parameters = nextParameters
     }
+
     if (hasOwn(patch, "equipmentUnitId")) {
-      if (item.technique !== "equipment") fail(400, "只有设备项可以改机台")
-      const type = equipmentTypeById(item.equipmentTypeId)
+      if (candidate.technique !== "equipment") fail(400, "只有设备项可以改机台")
+      const type = equipmentTypeById(candidate.equipmentTypeId)
       if (!type) fail(400, "这项器械没有可切换的设备类型，请删除后重新选择")
       let nextUnitId = patch.equipmentUnitId === null || patch.equipmentUnitId === "" ? null : patch.equipmentUnitId
       if (type.requiresUnit) {
@@ -685,55 +728,91 @@ export const entryMethods = {
         if (nextUnitId) fail(400, "共享设备不占具体机台")
         nextUnitId = null
       }
-      if ((item.equipmentUnitId || null) !== nextUnitId) touched = true
-      item.equipmentUnitId = nextUnitId
+      const unitChanged = (item.equipmentUnitId || null) !== nextUnitId
+      if (unitChanged && item.startedAt) fail(409, "设备使用中，请先结束使用再换机台")
+      if (unitChanged) touched = true
+      candidate.equipmentUnitId = nextUnitId
     }
+
     if (patch.direction) {
       if (!DIRECTIONS.some((row) => row.id === patch.direction)) fail(400, "方向不对")
-      if (patch.direction !== item.direction) touched = true
-      item.direction = patch.direction
+      if (patch.direction !== candidate.direction) touched = true
+      candidate.direction = patch.direction
     }
+
     if (patch.assigneeId) {
       if (!this.state.staff.some((row) => row.id === patch.assigneeId)) fail(404, "找不到这个人")
-      item.assigneeId = patch.assigneeId
-      const owner = this.patient(entry.patientId)
-      owner.lastAssigneeId = patch.assigneeId
+      candidate.assigneeId = patch.assigneeId
+      patientAssigneeId = patch.assigneeId
     }
-    if (Object.prototype.hasOwnProperty.call(patch, "side")) {
+
+    if (hasOwn(patch, "side")) {
       let side = normalizeSide(patch.side)
       // 新写入的器械项不能把可侧化目标的侧别静默清成 null；旧数据仍可原样读取。
-      if (item.technique === "equipment" && hasSides(targetById(item.targetId))) {
+      if (candidate.technique === "equipment" && hasSides(targetById(candidate.targetId))) {
         side = side || normalizeSide(entry.chiefSide)
         if (!side) fail(400, "请选择左侧或右侧")
       }
-      if (side !== (item.side || null)) touched = true
-      item.side = side
+      if (side !== (candidate.side || null)) touched = true
+      candidate.side = side
     }
-    if (typeof patch.done === "boolean") {
-      if (patch.done) {
-        if (!item.done) {
-          item.done = true
-          item.completedBy = staff.id
-          // 完成时刻跟着项走：交班、对账、事后还原顺序都靠它。
-          item.completedAt = new Date().toISOString()
+
+    if (hasOwn(patch, "started")) {
+      if (patch.started) {
+        if (candidate.equipmentUnitId) {
+          const conflict = activeEquipmentConflict(this, candidate.equipmentUnitId, item.id)
+          if (conflict) {
+            const unitName = equipmentUnitById(candidate.equipmentUnitId)?.name || candidate.equipmentUnitId
+            const patientName = conflict.patient?.name || "其他病人"
+            fail(409, `${unitName}正在被${patientName}使用，请先结束`)
+          }
         }
+        candidate.startedAt = new Date().toISOString()
+        candidate.startedBy = staff.id
       } else {
-        item.done = false
-        item.completedBy = null
-        item.completedAt = null
+        candidate.startedAt = null
+        candidate.startedBy = null
       }
     }
-    if (patch.dose && item.technique === "equipment") {
-      const sets = Math.max(1, Number(patch.dose.sets ?? item.dose.sets) || 1)
-      const reps = Math.max(1, Number(patch.dose.reps ?? item.dose.reps) || 1)
-      if (item.dose?.sets !== sets || item.dose?.reps !== reps) touched = true
-      item.dose = { sets, reps }
-    } else if (patch.dose) {
-      const minutes = Math.max(1, Number(patch.dose.minutes ?? item.dose.minutes) || 1)
-      if (item.dose?.minutes !== minutes) touched = true
-      item.dose = { minutes }
+
+    if (typeof patch.done === "boolean") {
+      if (patch.done) {
+        if (!candidate.done) {
+          candidate.done = true
+          candidate.completedBy = staff.id
+          // 完成时刻跟着项走：交班、对账、事后还原顺序都靠它。
+          candidate.completedAt = new Date().toISOString()
+        }
+        // 完成即释放设备；不依赖前端再发一次 started:false。
+        candidate.startedAt = null
+        candidate.startedBy = null
+      } else {
+        candidate.done = false
+        candidate.completedBy = null
+        candidate.completedAt = null
+        // 撤销完成不会自动开始设备；但同一请求显式 started:true 时保留这次启动。
+        if (patch.started !== true) {
+          candidate.startedAt = null
+          candidate.startedBy = null
+        }
+      }
     }
+
+    if (patch.dose && candidate.technique === "equipment") {
+      const sets = Math.max(1, Number(patch.dose.sets ?? candidate.dose?.sets) || 1)
+      const reps = Math.max(1, Number(patch.dose.reps ?? candidate.dose?.reps) || 1)
+      if (candidate.dose?.sets !== sets || candidate.dose?.reps !== reps) touched = true
+      candidate.dose = { sets, reps }
+    } else if (patch.dose) {
+      const minutes = Math.max(1, Number(patch.dose.minutes ?? candidate.dose?.minutes) || 1)
+      if (candidate.dose?.minutes !== minutes) touched = true
+      candidate.dose = { minutes }
+    }
+
+    Object.assign(item, candidate)
+    if (patientAssigneeId) this.patient(entry.patientId).lastAssigneeId = patientAssigneeId
     if (touched) touchDiverged(entry)
+    // started/完成状态变化也要推进版本号，但不触发 diverged。
     bumpEntryVersion(entry)
     this.save()
     this.audit(deviceId, "改一项", { 项: targetTitle(item.targetId, item.side || null), 改动: patch })
@@ -769,15 +848,16 @@ export const entryMethods = {
     const at = Number(index)
     if (!Number.isInteger(at) || at < 0 || at > entry.items.length) fail(400, "插回位置不对")
     if (!item || typeof item !== "object") fail(400, "缺少要插回的项")
-    workTargetOrThrow(item.targetId)
     if (item.technique && !TECHNIQUES.some((row) => row.id === item.technique)) fail(400, "手法不对")
     if (item.direction && !DIRECTIONS.some((row) => row.id === item.direction)) fail(400, "方向不对")
+    const technique = item.technique || "massage"
+    if (technique === "equipment") equipmentTargetOrThrow(item.targetId)
+    else workTargetOrThrow(item.targetId)
     const focus = focusOf(entry)
     const conditionId =
       typeof item.conditionId === "string" && entry.conditionIds.includes(item.conditionId)
         ? item.conditionId
         : focus
-    const technique = item.technique || "massage"
     const direction = item.direction || "along"
     const dose = item.dose ? structuredClone(item.dose) : defaultDose(technique)
     const restored = {
@@ -794,6 +874,9 @@ export const entryMethods = {
       done: Boolean(item.done),
       completedBy: typeof item.completedBy === "string" ? item.completedBy : null,
       completedAt: item.done && typeof item.completedAt === "string" ? item.completedAt : null,
+      // 撤销不恢复旧锁：被删时若还在使用，插回后必须重新确认机台空闲再开始。
+      startedAt: null,
+      startedBy: null,
     }
     entry.items.splice(at, 0, restored)
     touchDiverged(entry)
@@ -835,6 +918,42 @@ export const entryMethods = {
     this.save()
     this.audit(deviceId, "全部派给", { 派给: person.name })
     return this.entryView(deviceId, entry.id)
+  },
+
+  // 跨病人一键移交：只动未完成项；移交即释放设备锁，完成项保持原派工和历史。
+  reassignOpen({ deviceId, fromStaffId, toStaffId }) {
+    this.requireStaff(deviceId)
+    const from = this.state.staff.find((person) => person.id === fromStaffId) || null
+    const to = this.state.staff.find((person) => person.id === toStaffId) || null
+    if (!from || !to) fail(404, "找不到这个人")
+    if (from.id === to.id) fail(400, "不能移交给自己")
+
+    const changedPatients = new Set()
+    let count = 0
+    for (const entry of this.todayRecord().entries || []) {
+      let changed = false
+      for (const item of entry.items || []) {
+        if (!item || item.done || item.assigneeId !== from.id) continue
+        item.assigneeId = to.id
+        item.startedAt = null
+        item.startedBy = null
+        changedPatients.add(entry.patientId)
+        changed = true
+        count += 1
+      }
+      if (changed) bumpEntryVersion(entry)
+    }
+    for (const patientId of changedPatients) {
+      const patient = this.state.patients.find((row) => row.id === patientId)
+      if (patient) patient.lastAssigneeId = to.id
+    }
+    this.save()
+    this.audit(deviceId, "移交未完成", { 从: from.name, 到: to.name, 项数: count })
+    // 用只读 todayRecord 遍历，count=0 时不会凭空建一个空天。
+    return {
+      ...this.view(deviceId),
+      handoff: { fromStaffId: from.id, toStaffId: to.id, count },
+    }
   },
 
   dropEntry({ deviceId, entryId }) {
@@ -916,6 +1035,8 @@ export const entryMethods = {
         done: false,
         completedBy: null,
         completedAt: null,
+        startedAt: null,
+        startedBy: null,
       })
     }
     entry.focusConditionId = conditionId

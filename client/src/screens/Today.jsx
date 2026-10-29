@@ -1,12 +1,34 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom"
+import { doseLabel, targetTitle, techniqueLabel } from "@shared/catalog.js"
 import { api } from "../api.js"
 import { matchesInitials } from "../pinyin.js"
 import { SettingsSheet } from "./SettingsSheet.jsx"
 import { TodayCommandSheet } from "./TodayCommandSheet.jsx"
+import { TodayHandoffSheet } from "./TodayHandoffSheet.jsx"
 import { PULL_LIMIT, usePullToRefresh } from "../hooks/usePullToRefresh.js"
 import { useBackLayer } from "../back-layer.js"
 import "./today.css"
+
+function myTaskKey(task) {
+  return task?.itemId || task?.id || `${task?.entryId}:${task?.order}`
+}
+
+function isEquipmentTask(task) {
+  return Boolean(task && (task.technique === "equipment" || task.equipmentTypeId))
+}
+
+function myTaskTarget(task) {
+  return task?.targetTitle || (task?.targetId ? targetTitle(task.targetId, task.side || null) : "")
+}
+
+function myTaskDetail(task) {
+  if (!isEquipmentTask(task)) {
+    return [techniqueLabel(task?.technique), doseLabel(task?.technique, task?.dose)].filter(Boolean).join(" · ")
+  }
+  const dose = task?.dose?.sets || task?.dose?.reps ? doseLabel("equipment", task.dose) : ""
+  return [task.equipmentSummary || task.equipmentTypeName || "器械", dose].filter(Boolean).join(" · ")
+}
 
 export function Today({ snap, live, changedBy, onRefresh, onSnap, onOpen }) {
   const today = snap.today || []
@@ -23,6 +45,7 @@ export function Today({ snap, live, changedBy, onRefresh, onSnap, onOpen }) {
   const [settings, setSettings] = useState(false)
   const [commandOpen, setCommandOpen] = useState(false)
   const [commandNotice, setCommandNotice] = useState("")
+  const [handoffGroup, setHandoffGroup] = useState(null)
   const [mineOnly, setMineOnly] = useState(false)
   const [staffView, setStaffView] = useState(false)
   const [equipmentView, setEquipmentView] = useState(false)
@@ -34,7 +57,7 @@ export function Today({ snap, live, changedBy, onRefresh, onSnap, onOpen }) {
   const pendingRef = useRef(false)
   const [pending, setPending] = useState(false)
   const { ref: scrollRef, pull, refreshing } = usePullToRefresh({
-    enabled: !open && !settings && !commandOpen,
+    enabled: !open && !settings && !commandOpen && !handoffGroup,
     onRefresh,
     onSuccess: () => {
       setBanner("")
@@ -44,10 +67,11 @@ export function Today({ snap, live, changedBy, onRefresh, onSnap, onOpen }) {
   })
 
   // 返回键 / Escape 关弹层，而不是退出应用。
-  useBackLayer(open || settings || commandOpen, () => {
+  useBackLayer(open || settings || commandOpen || Boolean(handoffGroup), () => {
     setOpen(false)
     setSettings(false)
     setCommandOpen(false)
+    setHandoffGroup(null)
   })
 
   useEffect(() => {
@@ -134,6 +158,14 @@ export function Today({ snap, live, changedBy, onRefresh, onSnap, onOpen }) {
   const shownToday = mineOnly ? today.filter((entry) => (entry.mineTotal || 0) > 0) : today
   const byStaff = snap.todayByStaff || []
   const byEquipment = snap.todayByEquipment || []
+  const myTasks = Array.isArray(snap.myTasks) ? snap.myTasks : null
+  const myOpenTasks = useMemo(() => {
+    if (!Array.isArray(snap.myTasks)) return []
+    return snap.myTasks
+      .filter((task) => !task.done)
+      .sort((left, right) => (left.order ?? 0) - (right.order ?? 0))
+  }, [snap.myTasks])
+  const myCompletedCount = myTasks ? myTasks.filter((task) => task.done).length : 0
   // 病人多时今日单也能搜（和加入病人一个习惯：汉字/拼音首字母都行），人少时不占地方。
   const [todayQuery, setTodayQuery] = useState("")
   const filteredToday = useMemo(() => {
@@ -201,6 +233,7 @@ export function Today({ snap, live, changedBy, onRefresh, onSnap, onOpen }) {
 
   // 行内完成：只锁正在做的那一行（别的行照常点），返回值就是最新视图，不再重拉一遍。
   const [busyEntryId, setBusyEntryId] = useState(null)
+  const [busyTaskId, setBusyTaskId] = useState(null)
   function completeMine(entry) {
     if (!entry.mineNextId || busyEntryId) return
     setBusyEntryId(entry.id)
@@ -227,6 +260,57 @@ export function Today({ snap, live, changedBy, onRefresh, onSnap, onOpen }) {
         setError(err instanceof Error ? err.message : "未能保存")
       })
       .finally(() => setBusyEntryId(null))
+  }
+
+  // 我的任务队列：完成/开始/结束都走同一条 PATCH。
+  async function patchMyTask(task, patch) {
+    const key = myTaskKey(task)
+    const itemId = task?.itemId || task?.id
+    if (!task?.entryId || !itemId || busyTaskId) return
+    setBusyTaskId(key)
+    setError("")
+    try {
+      const next = await api.patchItem(task.entryId, itemId, patch, task.entryVersion)
+      onSnap(next)
+    } catch (err) {
+      const starting = patch.started === true
+      if (err?.status === 409 && patch.done === true) {
+        // 撞单先重拉：同一项还开着就自动重试一次；否则按原错误常驻显示。
+        try {
+          const fresh = await api.entry(task.entryId)
+          const item = fresh.entry?.items?.find((row) => row.id === itemId)
+          if (item && !item.done) {
+            const next = await api.patchItem(task.entryId, itemId, patch, fresh.entry?.version)
+            onSnap(next)
+            return
+          }
+        } catch {
+          /* 重拉也失败：落到下面统一报错 */
+        }
+        await onRefresh().catch(() => {})
+        setError(err instanceof Error ? err.message : "未能保存")
+      } else if (starting && err?.status === 409) {
+        setError(err?.message || "设备已被别人占用，请稍后刷新再试")
+        await onRefresh().catch(() => {})
+      } else {
+        await onRefresh().catch(() => {})
+        setError(err instanceof Error ? err.message : "未能保存")
+      }
+    } finally {
+      setBusyTaskId(null)
+    }
+  }
+
+  function completeMyTask(task) {
+    return patchMyTask(task, { done: true })
+  }
+
+  function startMyTask(task) {
+    return patchMyTask(task, { started: true })
+  }
+
+  function endMyTask(task) {
+    return patchMyTask(task, { started: false })
   }
 
 
@@ -262,6 +346,11 @@ export function Today({ snap, live, changedBy, onRefresh, onSnap, onOpen }) {
   function finishCommand(count) {
     setCommandOpen(false)
     setCommandNotice(count ? `已吩咐 ${count} 项` : "已吩咐 0 项 · 要治的位置已更新")
+  }
+
+  function finishHandoff(count) {
+    setHandoffGroup(null)
+    setCommandNotice(`已移交 ${count} 项`)
   }
 
   return (
@@ -315,15 +404,24 @@ export function Today({ snap, live, changedBy, onRefresh, onSnap, onOpen }) {
         {banner ? <p className="error">{banner}</p> : null}
         {commandNotice ? <p className="today-command-notice" role="status">{commandNotice}</p> : null}
         {/* 弹层都关着时，行内完成这类主界面上的失败也要看得见：不能只弹回按钮。 */}
-        {error && !open && !settings && !commandOpen ? (
+        {error && !open && !settings && !commandOpen && !handoffGroup ? (
           <p className="error today-error" role="alert">{error}</p>
         ) : null}
         {live === false ? (
           <p className="today-offline" role="status">连接断了，正在重连…恢复后自动刷新</p>
         ) : null}
         {changedBy ? <p className="today-changedby" role="status">{`${changedBy} 刚改过，已更新`}</p> : null}
-        {/* 单人治疗室仍需要「按设备」入口，但没有派工语义，所以只保留「全部」和「按设备」。 */}
+        {/* 单人房间也要有「我的任务」，但派工语义不存在，所以隐藏按人和移交。 */}
         <div className="today-tabs" role="tablist" aria-label="今日单视图">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mineOnly}
+            className={mineOnly ? "today-tab is-on" : "today-tab"}
+            onClick={() => selectTodayView("mine")}
+          >
+            {`我的任务 ${myTasks !== null ? myOpenTasks.length : mineCount}`}
+          </button>
           <button
             type="button"
             role="tab"
@@ -334,26 +432,15 @@ export function Today({ snap, live, changedBy, onRefresh, onSnap, onOpen }) {
             全部
           </button>
           {staffCount > 1 ? (
-            <>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={mineOnly}
-                className={mineOnly ? "today-tab is-on" : "today-tab"}
-                onClick={() => selectTodayView("mine")}
-              >
-                派给我的{mineCount ? ` ${mineCount}` : ""}
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={staffView}
-                className={staffView ? "today-tab is-on" : "today-tab"}
-                onClick={() => selectTodayView("staff")}
-              >
-                按人
-              </button>
-            </>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={staffView}
+              className={staffView ? "today-tab is-on" : "today-tab"}
+              onClick={() => selectTodayView("staff")}
+            >
+              按人
+            </button>
           ) : null}
           <button
             type="button"
@@ -397,24 +484,37 @@ export function Today({ snap, live, changedBy, onRefresh, onSnap, onOpen }) {
                 const queuedCount = Number.isFinite(group.queuedCount)
                   ? group.queuedCount
                   : Math.max(0, openCount - 1)
-                const derivedStatus = tasks.length === 0 ? "available" : openCount > 0 ? "occupied" : "done"
-                const status = ["available", "done", "occupied"].includes(group.status)
+                const openTasks = tasks.filter((task) => !task.done)
+                const hasStartedTask = openTasks.some((task) => task.startedAt || task.startedBy || task.started)
+                const derivedStatus = tasks.length === 0
+                  ? "available"
+                  : openCount > 0
+                    ? hasStartedTask ? "in_use" : "occupied"
+                    : "done"
+                const status = ["available", "done", "occupied", "in_use"].includes(group.status)
                   ? group.status
                   : derivedStatus
-                const statusText = status === "occupied"
-                  ? queuedCount > 0 ? `排队 ${queuedCount} 项` : "当前"
-                  : status === "done" ? "今日完成" : "空闲"
-                const currentTask = status === "occupied"
-                  ? group.currentTask || tasks.find((task) => !task.done) || null
-                  : null
+                const statusText = status === "in_use"
+                  ? "使用中"
+                  : status === "occupied"
+                    ? queuedCount > 0 ? `排队 ${queuedCount} 项` : "当前"
+                    : status === "done" ? "今日完成" : "空闲"
+                const currentTask = status === "in_use"
+                  ? group.activeTask || group.currentTask || openTasks.find((task) => task.startedAt || task.startedBy || task.started) || openTasks[0] || null
+                  : status === "occupied"
+                    ? group.currentTask || openTasks[0] || null
+                    : null
                 const currentKey = currentTask?.itemId || `${currentTask?.entryId}:${currentTask?.order}`
+                const currentLabel = status === "in_use" ? "使用中：" : "当前："
+                const currentQueue = status === "in_use" && queuedCount > 0 ? ` · 排队 ${queuedCount} 项` : ""
+                const statusClass = status === "in_use" ? "in-use" : status
                 return (
                   <section key={group.key || group.equipmentUnitId || group.equipmentTypeId} className="today-group today-equipment-group">
                     <h2 className="today-group-title today-equipment-title">
                       <span className="today-equipment-group-name">{title}</span>
                       <span className="today-equipment-meta">
                         {group.shared ? <span className="today-equipment-shared">共享</span> : null}
-                        <span className={`today-equipment-badge is-${status}${queuedCount > 0 ? " is-queued" : ""}`}>
+                        <span className={`today-equipment-badge is-${statusClass}${status === "occupied" && queuedCount > 0 ? " is-queued" : ""}`}>
                           {statusText}
                         </span>
                         <span className="today-group-count">{`${done}/${total}`}</span>
@@ -422,10 +522,11 @@ export function Today({ snap, live, changedBy, onRefresh, onSnap, onOpen }) {
                     </h2>
                     {currentTask ? (
                       <p className="today-equipment-current">
-                        <span className="today-equipment-current-label">当前：</span>
+                        <span className="today-equipment-current-label">{currentLabel}</span>
                         {[currentTask.patientName, currentTask.assigneeName, currentTask.targetTitle]
                           .filter(Boolean)
                           .join(" · ")}
+                        {currentQueue}
                       </p>
                     ) : null}
                     {tasks.length === 0 ? (
@@ -437,7 +538,8 @@ export function Today({ snap, live, changedBy, onRefresh, onSnap, onOpen }) {
                       <div className="today-list today-equipment-list">
                         {tasks.map((task) => {
                           const taskKey = task.itemId || `${task.entryId}:${task.order}`
-                          const isCurrent = status === "occupied" && currentKey === taskKey
+                          const isCurrent = (status === "occupied" || status === "in_use") && currentKey === taskKey
+                          const taskStarted = Boolean(task.startedAt || task.startedBy || task.started)
                           return (
                             <button
                               key={taskKey}
@@ -460,8 +562,8 @@ export function Today({ snap, live, changedBy, onRefresh, onSnap, onOpen }) {
                                 <span className={task.assigneeName ? "today-equipment-assignee" : "today-equipment-assignee is-unassigned"}>
                                   {task.assigneeName || "未派"}
                                 </span>
-                                <span className={task.done ? "today-equipment-state is-done" : "today-equipment-state"}>
-                                  {task.done ? "已完成" : "未完成"}
+                                <span className={task.done ? "today-equipment-state is-done" : taskStarted ? "today-equipment-state is-in-use" : "today-equipment-state"}>
+                                  {task.done ? "已完成" : taskStarted ? "使用中" : "未完成"}
                                 </span>
                               </span>
                             </button>
@@ -473,17 +575,113 @@ export function Today({ snap, live, changedBy, onRefresh, onSnap, onOpen }) {
                 )
               })
             )
+          ) : mineOnly && myTasks !== null ? (
+            <section className="today-my-queue" aria-label="我的任务">
+              {myOpenTasks.length ? (
+                <div className="today-my-list">
+                  {myOpenTasks.map((task, myIndex) => {
+                    const key = myTaskKey(task)
+                    const equipment = isEquipmentTask(task)
+                    const started = Boolean(task.startedAt || task.startedBy || task.started)
+                    const starterName = task.startedByName ||
+                      (snap.staff || []).find((person) => person.id === task.startedBy)?.name ||
+                      "员工"
+                    const busy = busyTaskId === key
+                    return (
+                      <div key={key} className={started ? "today-my-wrap is-started" : "today-my-wrap"}>
+                        <button
+                          type="button"
+                          className="row-btn today-my-task"
+                          onClick={() => onOpen(task.entryId)}
+                        >
+                          <span className="today-my-order" aria-label={`我的第 ${myIndex + 1} 项`}>
+                            {myIndex + 1}
+                          </span>
+                          <span className="today-my-body">
+                            <span className="today-my-top">
+                              <span className="today-my-patient">{task.patientName}</span>
+                              <span className="today-my-target">{myTaskTarget(task)}</span>
+                            </span>
+                            <span className="today-my-detail">{myTaskDetail(task)}</span>
+                            {task.note ? <span className="today-my-note">{`⚠ ${task.note}`}</span> : null}
+                            {equipment && started ? (
+                              <span className="today-my-use">{`使用中 · ${starterName}`}</span>
+                            ) : null}
+                          </span>
+                          <span className={started ? "today-my-state is-started" : "today-my-state"}>
+                            {task.done ? "已完成" : started ? "使用中" : equipment ? "未开始" : "未完成"}
+                          </span>
+                        </button>
+                        <div className="today-my-actions">
+                          {equipment ? (
+                            started ? (
+                              <button
+                                type="button"
+                                className="secondary today-my-action"
+                                disabled={busy}
+                                onClick={() => endMyTask(task)}
+                              >
+                                结束设备
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                className="secondary today-my-action"
+                                disabled={busy}
+                                onClick={() => startMyTask(task)}
+                              >
+                                开始设备
+                              </button>
+                            )
+                          ) : null}
+                          <button
+                            type="button"
+                            className="primary today-my-action is-done"
+                            disabled={busy}
+                            onClick={() => completeMyTask(task)}
+                          >
+                            {busy ? "保存中…" : "完成"}
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              ) : (
+                <p className="today-empty">
+                  {myTasks.length ? "我的任务都完成了" : "今天还没有派给你的任务"}
+                </p>
+              )}
+              {myCompletedCount ? (
+                <p className="today-my-completed">{`已完成 ${myCompletedCount} 项`}</p>
+              ) : null}
+            </section>
           ) : staffView ? (
             byStaff.length === 0 ? (
               <p className="today-empty">今天还没有病人</p>
             ) : (
-              byStaff.map((group) => (
+              byStaff.map((group) => {
+                const open = Number.isFinite(group.open)
+                  ? group.open
+                  : Math.max(0, Number(group.total || 0) - Number(group.done || 0))
+                return (
                 <section key={group.staffId || "none"} className="today-group">
-                  <h2 className="today-group-title">
-                    {group.name}
-                    <span className="today-group-count">
-                      {`${group.done}/${group.total}`}
-                      {group.minutes ? ` · 剩约${group.minutes}分钟` : ""}
+                  <h2 className="today-group-title today-staff-title">
+                    <span>{group.name}</span>
+                    <span className="today-staff-meta">
+                      <span className="today-group-count">
+                        {`${group.done}/${group.total}`}
+                        {group.minutes ? ` · 剩约${group.minutes}分钟` : ""}
+                      </span>
+                      {staffCount > 1 && group.staffId && open > 0 ? (
+                        <button
+                          type="button"
+                          className="today-handoff-btn"
+                          onClick={() => setHandoffGroup(group)}
+                        >
+                          {`移交 ${open} 项`}
+                        </button>
+                      ) : null}
                     </span>
                   </h2>
                   <div className="today-list">
@@ -500,7 +698,8 @@ export function Today({ snap, live, changedBy, onRefresh, onSnap, onOpen }) {
                     ))}
                   </div>
                 </section>
-              ))
+                )
+              })
             )
           ) : (
             <div className="today-list">
@@ -524,7 +723,7 @@ export function Today({ snap, live, changedBy, onRefresh, onSnap, onOpen }) {
                   ) : null}
                 </div>
               ) : filteredToday.map((entry) => {
-                // 单人治疗室没有「派给我的」标签：行内完成直接开在名单行上。
+                // 单人治疗室在「全部」里仍直接显示行内完成：所有项都算自己的。
                 const inline = mineOnly || !multi
                 const showComplete = inline && entry.mineNextId
                 return (
@@ -772,6 +971,15 @@ export function Today({ snap, live, changedBy, onRefresh, onSnap, onOpen }) {
           document.body,
         )
         : null}
+      {handoffGroup ? (
+        <TodayHandoffSheet
+          snap={snap}
+          group={handoffGroup}
+          onClose={() => setHandoffGroup(null)}
+          onSnap={onSnap}
+          onDone={finishHandoff}
+        />
+      ) : null}
       {commandOpen ? (
         <TodayCommandSheet
           snap={snap}

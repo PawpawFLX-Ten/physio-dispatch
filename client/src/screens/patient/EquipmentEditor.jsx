@@ -4,6 +4,7 @@ import {
   buildEquipmentParameterDraft,
   equipmentParameterDraftState,
   equipmentParameterFields,
+  equipmentStartedText,
 } from "./helpers.js"
 
 function optionValue(option) {
@@ -22,6 +23,7 @@ export function EquipmentEditor({
   pending,
   onSaveParameters,
   onSelectUnit,
+  onSetStarted,
 }) {
   const fields = equipmentParameterFields(type)
   // 父层以参数快照作 key；保存成功/外部改动会重挂并刷新草稿，改派工/机台不会丢本地编辑。
@@ -31,6 +33,10 @@ export function EquipmentEditor({
     .filter((unit) => unit?.equipmentTypeId === type?.id)
     .sort((left, right) => (left.order || 0) - (right.order || 0))
   const currentUnitId = item.equipmentUnitId || ""
+  const currentUnit = typeUnits.find((unit) => unit.id === currentUnitId) || null
+  const currentUnitName = item.equipmentUnitName || currentUnit?.name || ""
+  const started = Boolean(item.startedAt)
+  const startedText = equipmentStartedText(item)
   const deviceName = type?.name || item.equipmentTypeName || item.equipmentSummary || "设备"
 
   function updateField(field, value) {
@@ -63,6 +69,47 @@ export function EquipmentEditor({
           </div>
         </dl>
       </header>
+
+      <section className={started && !item.done ? "patient-equipment-usage is-running" : "patient-equipment-usage"} aria-label="设备使用状态">
+        <p className="patient-label">使用状态</p>
+        {item.done ? (
+          <p className="patient-equipment-note">已完成，设备已释放。</p>
+        ) : started ? (
+          <div className="patient-equipment-usage-row">
+            <div className="patient-equipment-usage-copy">
+              <p className="patient-equipment-usage-state">
+                <span className="patient-in-use-badge">使用中</span>
+                <span>{` · ${startedText}`}</span>
+              </p>
+              {type?.requiresUnit && currentUnitName ? (
+                <p className="patient-equipment-usage-unit">{`机台：${currentUnitName}`}</p>
+              ) : null}
+            </div>
+            <button
+              type="button"
+              className="secondary patient-equipment-usage-btn"
+              disabled={pending}
+              onClick={() => onSetStarted?.(false)}
+            >
+              结束使用
+            </button>
+          </div>
+        ) : (
+          <div className="patient-equipment-usage-start">
+            {type?.requiresUnit && currentUnitName ? (
+              <p className="patient-equipment-usage-unit">{`机台：${currentUnitName}`}</p>
+            ) : null}
+            <button
+              type="button"
+              className="primary patient-equipment-usage-btn"
+              disabled={pending}
+              onClick={() => onSetStarted?.(true)}
+            >
+              开始使用设备
+            </button>
+          </div>
+        )}
+      </section>
 
       {fields.length ? (
         <form className="patient-equipment-parameter-form" onSubmit={submitParameters}>

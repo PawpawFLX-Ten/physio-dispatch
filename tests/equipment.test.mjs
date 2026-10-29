@@ -652,3 +652,598 @@ test("todayByEquipment shows idle units plus soft current/queued occupancy", () 
   assert.equal(advanced.queuedCount, 0)
   assert.equal(advanced.openCount, 1)
 })
+
+test("started is a real per-unit lock; stop and done release it without clinical divergence", () => {
+  const { store } = openStore()
+  const first = patientWithChief(store, "right", "右膝疼痛")
+  const second = store.createPatient({ deviceId: "doc", name: "李叔", conditionName: "左肩痛" })
+  store.setChief({ deviceId: "doc", entryId: second.entry.id, targetId: "shoulder", side: "left" })
+  const doc = store.state.staff.find((person) => person.name === "之之")
+
+  const firstView = store.addItem({
+    deviceId: "doc",
+    entryId: first.entry.id,
+    targetId: "quad",
+    equipmentTypeId: "ultrasound",
+    equipmentUnitId: "ultrasound-1",
+  })
+  const secondView = store.addItem({
+    deviceId: "doc",
+    entryId: second.entry.id,
+    targetId: "supraspinatus",
+    equipmentTypeId: "ultrasound",
+    equipmentUnitId: "ultrasound-1",
+  })
+  const firstItem = firstView.entry.items[0]
+  const secondItem = secondView.entry.items[0]
+  // 先把两边都答过“回写病症”，后面 started 不该把 divergedAcked 重新点亮。
+  store.leave({ deviceId: "doc", entryId: first.entry.id, updateCondition: false })
+  store.leave({ deviceId: "doc", entryId: second.entry.id, updateCondition: false })
+  const versionFirst = store.entryById(first.entry.id).version
+  const versionSecond = store.entryById(second.entry.id).version
+
+  const started = store.patchItem({
+    deviceId: "doc",
+    entryId: first.entry.id,
+    itemId: firstItem.id,
+    patch: { started: true },
+  })
+  const locked = started.entry.items[0]
+  assert.equal(Number.isFinite(Date.parse(locked.startedAt)), true)
+  assert.equal(new Date(locked.startedAt).toISOString(), locked.startedAt)
+  assert.equal(locked.startedBy, doc.id)
+  assert.equal(locked.startedByName, "之之")
+  assert.equal(started.entry.version, versionFirst + 1)
+  assert.equal(store.entryById(first.entry.id).divergedAcked, true)
+  assert.equal(started.entry.diverged, false)
+
+  const presented = store.entryView("doc", first.entry.id).entry.items[0]
+  assert.equal(presented.startedAt, locked.startedAt)
+  assert.equal(presented.startedBy, doc.id)
+  assert.equal(presented.startedByName, "之之")
+
+  const inUse = store.view("doc").todayByEquipment.find((group) => group.equipmentUnitId === "ultrasound-1")
+  assert.equal(inUse.status, "in_use")
+  assert.equal(inUse.activeTask.patientName, "王阿姨")
+  assert.equal(inUse.activeTask.startedBy, doc.id)
+  assert.equal(inUse.activeTask.startedByName, "之之")
+  assert.equal(inUse.currentTask.itemId, firstItem.id)
+
+  assert.throws(
+    () =>
+      store.patchItem({
+        deviceId: "doc",
+        entryId: second.entry.id,
+        itemId: secondItem.id,
+        patch: { started: true },
+      }),
+    (error) => {
+      assert.equal(error.status, 409)
+      assert.match(error.message, /超声 1 号机/)
+      assert.match(error.message, /王阿姨/)
+      return true
+    },
+  )
+  const secondAfterConflict = store.entryById(second.entry.id)
+  assert.equal(secondAfterConflict.version, versionSecond)
+  assert.equal(secondAfterConflict.items[0].startedAt, null)
+  assert.equal(secondAfterConflict.items[0].startedBy, null)
+
+  const versionBeforeSwitch = store.entryById(first.entry.id).version
+  assert.throws(
+    () =>
+      store.patchItem({
+        deviceId: "doc",
+        entryId: first.entry.id,
+        itemId: firstItem.id,
+        patch: { equipmentUnitId: "ultrasound-2" },
+      }),
+    /先结束/,
+  )
+  const afterRejectedSwitch = store.entryById(first.entry.id)
+  assert.equal(afterRejectedSwitch.version, versionBeforeSwitch)
+  assert.equal(afterRejectedSwitch.items[0].equipmentUnitId, "ultrasound-1")
+  assert.equal(afterRejectedSwitch.items[0].startedAt, locked.startedAt)
+
+  // 使用中允许调参数，锁与开始人保持不动。
+  const parameterEdit = store.patchItem({
+    deviceId: "doc",
+    entryId: first.entry.id,
+    itemId: firstItem.id,
+    patch: { parameters: { intensity: 1.7, minutes: 11 } },
+  })
+  assert.equal(parameterEdit.entry.items[0].parameters.intensity, 1.7)
+  assert.equal(parameterEdit.entry.items[0].parameters.minutes, 11)
+  assert.equal(parameterEdit.entry.items[0].startedAt, locked.startedAt)
+  assert.equal(parameterEdit.entry.items[0].startedBy, doc.id)
+
+  const released = store.patchItem({
+    deviceId: "doc",
+    entryId: first.entry.id,
+    itemId: firstItem.id,
+    patch: { started: false },
+  })
+  assert.equal(released.entry.items[0].startedAt, null)
+  assert.equal(released.entry.items[0].startedBy, null)
+  const releasedGroup = store.view("doc").todayByEquipment.find(
+    (group) => group.equipmentUnitId === "ultrasound-1",
+  )
+  assert.equal(releasedGroup.status, "occupied")
+  assert.equal(releasedGroup.activeTask, null)
+
+  const secondStarted = store.patchItem({
+    deviceId: "doc",
+    entryId: second.entry.id,
+    itemId: secondItem.id,
+    patch: { started: true },
+  })
+  assert.ok(secondStarted.entry.items[0].startedAt)
+  const done = store.patchItem({
+    deviceId: "doc",
+    entryId: second.entry.id,
+    itemId: secondItem.id,
+    patch: { done: true },
+  })
+  assert.equal(done.entry.items[0].done, true)
+  assert.equal(done.entry.items[0].startedAt, null)
+  assert.equal(done.entry.items[0].startedBy, null)
+
+  const restarted = store.patchItem({
+    deviceId: "doc",
+    entryId: first.entry.id,
+    itemId: firstItem.id,
+    patch: { started: true },
+  })
+  assert.ok(restarted.entry.items[0].startedAt)
+})
+
+test("started patch is atomic and done:false never auto-starts", () => {
+  const { store } = openStore()
+  const created = patientWithChief(store, "right")
+  store.addItem({
+    deviceId: "doc",
+    entryId: created.entry.id,
+    targetId: "quad",
+    equipmentTypeId: "ultrasound",
+    equipmentUnitId: "ultrasound-1",
+  })
+  const beforeItem = structuredClone(store.entryById(created.entry.id).items[0])
+  const beforeVersion = store.entryById(created.entry.id).version
+  assert.throws(
+    () =>
+      store.patchItem({
+        deviceId: "doc",
+        entryId: created.entry.id,
+        itemId: beforeItem.id,
+        patch: { started: true, direction: "乱写" },
+      }),
+    /方向不对/,
+  )
+  assert.deepEqual(store.entryById(created.entry.id).items[0], beforeItem)
+  assert.equal(store.entryById(created.entry.id).version, beforeVersion)
+
+  store.patchItem({
+    deviceId: "doc",
+    entryId: created.entry.id,
+    itemId: beforeItem.id,
+    patch: { started: true },
+  })
+  const completed = store.patchItem({
+    deviceId: "doc",
+    entryId: created.entry.id,
+    itemId: beforeItem.id,
+    patch: { done: true },
+  })
+  assert.equal(completed.entry.items[0].done, true)
+  assert.equal(completed.entry.items[0].startedAt, null)
+  const reopened = store.patchItem({
+    deviceId: "doc",
+    entryId: created.entry.id,
+    itemId: beforeItem.id,
+    patch: { done: false },
+  })
+  assert.equal(reopened.entry.items[0].done, false)
+  assert.equal(reopened.entry.items[0].startedAt, null)
+  assert.equal(reopened.entry.items[0].startedBy, null)
+
+  // 历史脏数据里 done 项若还挂着半把锁，重新打开完成也不能让它变成“使用中”。
+  const stale = store.entryById(created.entry.id).items[0]
+  stale.done = true
+  stale.startedAt = "2026-03-01T00:00:00.000Z"
+  stale.startedBy = store.state.staff[0].id
+  const reopenedStale = store.patchItem({
+    deviceId: "doc",
+    entryId: created.entry.id,
+    itemId: stale.id,
+    patch: { done: false },
+  })
+  assert.equal(reopenedStale.entry.items[0].done, false)
+  assert.equal(reopenedStale.entry.items[0].startedAt, null)
+  assert.equal(reopenedStale.entry.items[0].startedBy, null)
+})
+
+test("myTasks flattens today in global order, keeps done items and includes solo legacy null assignee", () => {
+  const { store } = openStore()
+  const first = patientWithChief(store, "right", "右膝疼痛")
+  const second = store.createPatient({ deviceId: "doc", name: "李叔", conditionName: "左肩痛" })
+  store.setChief({ deviceId: "doc", entryId: second.entry.id, targetId: "shoulder", side: "left" })
+  const doc = store.state.staff.find((person) => person.name === "之之")
+  const aide = store.state.staff.find((person) => person.name === "小李")
+
+  const firstView = store.addItem({
+    deviceId: "doc",
+    entryId: first.entry.id,
+    targetId: "quad",
+    equipmentTypeId: "ultrasound",
+    equipmentUnitId: "ultrasound-1",
+  })
+  const firstEquipmentId = firstView.entry.items[0].id
+  const aideItem = store.addItem({
+    deviceId: "doc",
+    entryId: first.entry.id,
+    targetId: "hamstring",
+    technique: "massage",
+    direction: "along",
+    dose: { minutes: 8 },
+    assigneeId: aide.id,
+  })
+  const aideItemId = aideItem.entry.items[1].id
+
+  store.addItem({
+    deviceId: "doc",
+    entryId: second.entry.id,
+    targetId: "infraspinatus",
+    exerciseTemplateId: "band-shoulder-external-rotation",
+    side: "left",
+  })
+  const bandDone = store.entryById(second.entry.id).items[0]
+  store.patchItem({
+    deviceId: "doc",
+    entryId: second.entry.id,
+    itemId: bandDone.id,
+    patch: { done: true },
+  })
+  store.addItem({
+    deviceId: "doc",
+    entryId: second.entry.id,
+    targetId: "supraspinatus",
+    equipmentTypeId: "ultrasound",
+    equipmentUnitId: "ultrasound-2",
+    side: "left",
+  })
+  const activeItem = store.entryById(second.entry.id).items[1]
+  store.patchItem({
+    deviceId: "doc",
+    entryId: second.entry.id,
+    itemId: activeItem.id,
+    patch: { started: true },
+  })
+
+  const view = store.view("doc")
+  const tasks = view.myTasks
+  assert.deepEqual(
+    tasks.map((task) => [task.patientName, task.order]),
+    [
+      ["王阿姨", 1],
+      ["李叔", 3],
+      ["李叔", 4],
+    ],
+  )
+  assert.equal(tasks.some((task) => task.itemId === firstEquipmentId), true)
+  assert.equal(tasks.some((task) => task.itemId === aideItemId), false)
+  const doneTask = tasks.find((task) => task.itemId === bandDone.id)
+  assert.equal(doneTask.done, true)
+  assert.equal(typeof doneTask.completedAt, "string")
+  const activeTask = tasks.find((task) => task.itemId === activeItem.id)
+  assert.equal(activeTask.startedBy, doc.id)
+  assert.equal(activeTask.startedByName, "之之")
+  assert.equal(activeTask.equipmentUnitId, "ultrasound-2")
+  assert.match(activeTask.equipmentSummary, /超声/)
+  assert.equal(activeTask.targetTitle, "左冈上肌")
+  assert.equal(activeTask.entryVersion, store.entryById(second.entry.id).version)
+
+  const requiredFields = [
+    "itemId",
+    "entryId",
+    "entryVersion",
+    "patientId",
+    "patientName",
+    "note",
+    "order",
+    "targetId",
+    "targetTitle",
+    "side",
+    "technique",
+    "direction",
+    "dose",
+    "equipmentTypeId",
+    "equipmentUnitId",
+    "equipmentSummary",
+    "exerciseName",
+    "assigneeId",
+    "assigneeName",
+    "done",
+    "completedAt",
+    "startedAt",
+    "startedBy",
+    "startedByName",
+  ]
+  for (const field of requiredFields) assert.ok(Object.prototype.hasOwnProperty.call(activeTask, field), field)
+  assert.deepEqual(store.entryView("doc", second.entry.id).myTasks, tasks)
+
+  const docGroup = view.todayByStaff.find((group) => group.staffId === doc.id)
+  assert.equal(docGroup.open, docGroup.total - docGroup.done)
+
+  // 单人房：历史 null assignee 也算当前唯一员工的任务。
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "clinic-equipment-solo-"))
+  const solo = new ClinicStore(path.join(dir, "clinic.json"))
+  solo.load()
+  solo.setup({ deviceId: "doc", staffName: "独班" })
+  const soloPatient = solo.createPatient({ deviceId: "doc", name: "独班阿姨", conditionName: "膝痛" })
+  solo.setChief({ deviceId: "doc", entryId: soloPatient.entry.id, targetId: "knee", side: "right" })
+  solo.addItem({ deviceId: "doc", entryId: soloPatient.entry.id, targetId: "quad" })
+  const legacy = solo.entryById(soloPatient.entry.id).items[0]
+  legacy.assigneeId = null
+  assert.equal(solo.view("doc").myTasks.some((task) => task.itemId === legacy.id), true)
+})
+
+test("reassignOpen moves only open tasks, releases locks, bumps versions and updates lastAssignee", () => {
+  const { store } = openStore()
+  const first = patientWithChief(store, "right", "右膝疼痛")
+  const second = store.createPatient({ deviceId: "doc", name: "李叔", conditionName: "左肩痛" })
+  store.setChief({ deviceId: "doc", entryId: second.entry.id, targetId: "shoulder", side: "left" })
+  const doc = store.state.staff.find((person) => person.name === "之之")
+  const aide = store.state.staff.find((person) => person.name === "小李")
+
+  store.addItem({
+    deviceId: "doc",
+    entryId: first.entry.id,
+    targetId: "quad",
+    equipmentTypeId: "ultrasound",
+    equipmentUnitId: "ultrasound-1",
+  })
+  const lockedItem = store.entryById(first.entry.id).items[0]
+  store.patchItem({
+    deviceId: "doc",
+    entryId: first.entry.id,
+    itemId: lockedItem.id,
+    patch: { started: true },
+  })
+  store.addItem({
+    deviceId: "doc",
+    entryId: first.entry.id,
+    targetId: "hamstring",
+    technique: "massage",
+    direction: "along",
+    dose: { minutes: 8 },
+  })
+  const completedItem = store.entryById(first.entry.id).items[1]
+  store.patchItem({
+    deviceId: "doc",
+    entryId: first.entry.id,
+    itemId: completedItem.id,
+    patch: { done: true },
+  })
+  const completedAt = store.entryById(first.entry.id).items[1].completedAt
+
+  store.addItem({
+    deviceId: "doc",
+    entryId: second.entry.id,
+    targetId: "infraspinatus",
+    exerciseTemplateId: "band-shoulder-external-rotation",
+    side: "left",
+  })
+  const otherLockedItem = store.entryById(second.entry.id).items[0]
+  store.patchItem({
+    deviceId: "doc",
+    entryId: second.entry.id,
+    itemId: otherLockedItem.id,
+    patch: { started: true },
+  })
+  store.addItem({
+    deviceId: "doc",
+    entryId: second.entry.id,
+    targetId: "rhomboid",
+    technique: "massage",
+    direction: "along",
+    dose: { minutes: 8 },
+    assigneeId: aide.id,
+  })
+  const aideOwnItem = store.entryById(second.entry.id).items[1]
+
+  const firstVersion = store.entryById(first.entry.id).version
+  const secondVersion = store.entryById(second.entry.id).version
+  const beforeFailure = structuredClone(store.state.days)
+  assert.throws(
+    () => store.reassignOpen({ deviceId: "doc", fromStaffId: doc.id, toStaffId: doc.id }),
+    /不能移交给自己/,
+  )
+  assert.deepEqual(store.state.days, beforeFailure)
+  assert.throws(
+    () => store.reassignOpen({ deviceId: "doc", fromStaffId: "ghost", toStaffId: aide.id }),
+    /找不到这个人/,
+  )
+
+  const view = store.reassignOpen({ deviceId: "doc", fromStaffId: doc.id, toStaffId: aide.id })
+  assert.deepEqual(view.handoff, { fromStaffId: doc.id, toStaffId: aide.id, count: 2 })
+  const firstAfter = store.entryById(first.entry.id)
+  const secondAfter = store.entryById(second.entry.id)
+  assert.equal(firstAfter.version, firstVersion + 1)
+  assert.equal(secondAfter.version, secondVersion + 1)
+
+  const movedLock = firstAfter.items.find((item) => item.id === lockedItem.id)
+  assert.equal(movedLock.assigneeId, aide.id)
+  assert.equal(movedLock.startedAt, null)
+  assert.equal(movedLock.startedBy, null)
+  const stillCompleted = firstAfter.items.find((item) => item.id === completedItem.id)
+  assert.equal(stillCompleted.assigneeId, doc.id)
+  assert.equal(stillCompleted.done, true)
+  assert.equal(stillCompleted.completedAt, completedAt)
+  const movedOther = secondAfter.items.find((item) => item.id === otherLockedItem.id)
+  assert.equal(movedOther.assigneeId, aide.id)
+  assert.equal(movedOther.startedAt, null)
+  assert.equal(movedOther.startedBy, null)
+  const stillAideOwn = secondAfter.items.find((item) => item.id === aideOwnItem.id)
+  assert.equal(stillAideOwn.assigneeId, aide.id)
+
+  assert.equal(store.patient(first.entry.patientId).lastAssigneeId, aide.id)
+  assert.equal(store.patient(second.entry.patientId).lastAssigneeId, aide.id)
+  assert.equal(view.myTasks.every((task) => task.assigneeId !== doc.id || task.done), true)
+  assert.equal(view.myTasks.some((task) => task.itemId === completedItem.id && task.done), true)
+  const aideTasks = store.view("aide").myTasks
+  assert.equal(aideTasks.some((task) => task.itemId === lockedItem.id), true)
+  assert.equal(aideTasks.some((task) => task.itemId === otherLockedItem.id), true)
+  assert.equal(aideTasks.some((task) => task.itemId === aideOwnItem.id), true)
+  const ultrasoundGroup = store.view("doc").todayByEquipment.find(
+    (group) => group.equipmentUnitId === "ultrasound-1",
+  )
+  assert.equal(ultrasoundGroup.activeTask, null)
+  assert.equal(ultrasoundGroup.status, "occupied")
+})
+
+test("reassignOpen with nothing to move returns count zero without creating an empty today", () => {
+  const { store } = openStore()
+  const doc = store.state.staff.find((person) => person.name === "之之")
+  const aide = store.state.staff.find((person) => person.name === "小李")
+  assert.equal(todayKey() in store.state.days, false)
+  const view = store.reassignOpen({ deviceId: "doc", fromStaffId: doc.id, toStaffId: aide.id })
+  assert.deepEqual(view.handoff, { fromStaffId: doc.id, toStaffId: aide.id, count: 0 })
+  assert.equal(todayKey() in store.state.days, false)
+  assert.equal(view.stage, "ready")
+})
+
+test("started fields sanitize on import and old entries load with explicit null locks", () => {
+  const { store, file } = openStore()
+  const created = patientWithChief(store, "right")
+  store.addItem({
+    deviceId: "doc",
+    entryId: created.entry.id,
+    targetId: "quad",
+    equipmentTypeId: "ultrasound",
+    equipmentUnitId: "ultrasound-1",
+  })
+  store.addItem({
+    deviceId: "doc",
+    entryId: created.entry.id,
+    targetId: "hamstring",
+    equipmentTypeId: "ultrasound",
+    equipmentUnitId: "ultrasound-2",
+  })
+  store.addItem({
+    deviceId: "doc",
+    entryId: created.entry.id,
+    targetId: "glute",
+    equipmentTypeId: "ultrasound",
+    equipmentUnitId: "ultrasound-1",
+  })
+  const doc = store.state.staff[0]
+  const data = structuredClone(store.exportData("doc"))
+  const entry = data.days[todayKey()].entries[0]
+  const validId = entry.items[0].id
+  const doneId = entry.items[1].id
+  const invalidId = entry.items[2].id
+  entry.items[0].startedAt = "2026-03-01T01:02:03.000Z"
+  entry.items[0].startedBy = doc.id
+  entry.items[1].startedAt = "2026-03-01T02:03:04.000Z"
+  entry.items[1].startedBy = doc.id
+  entry.items[1].done = true
+  entry.items[1].completedBy = doc.id
+  entry.items[1].completedAt = "2026-03-01T02:20:00.000Z"
+  entry.items[2].startedAt = "2026-03-01T03:04:05.000Z"
+  entry.items[2].startedBy = "not-on-staff"
+  entry.items.push({
+    ...structuredClone(entry.items[0]),
+    id: "legacy-no-started",
+    startedAt: undefined,
+    startedBy: undefined,
+  })
+
+  store.importData({ deviceId: "doc", data })
+  const items = store.entryById(created.entry.id).items
+  const valid = items.find((item) => item.id === validId)
+  const done = items.find((item) => item.id === doneId)
+  const invalid = items.find((item) => item.id === invalidId)
+  const legacy = items.find((item) => item.id === "legacy-no-started")
+  assert.equal(valid.startedAt, "2026-03-01T01:02:03.000Z")
+  assert.equal(valid.startedBy, doc.id)
+  assert.equal(done.startedAt, null)
+  assert.equal(done.startedBy, null)
+  assert.equal(invalid.startedAt, null)
+  assert.equal(invalid.startedBy, null)
+  assert.equal(legacy.startedAt, null)
+  assert.equal(legacy.startedBy, null)
+  assert.equal(store.entryView("doc", created.entry.id).entry.items.find((item) => item.id === validId).startedByName, doc.name)
+
+  // 读盘路径（normalizeLoadedState）也必须把缺字段补成 null，而不是 undefined。
+  store.save()
+  const revived = new ClinicStore(file)
+  revived.load()
+  for (const item of revived.entryById(created.entry.id).items) {
+    assert.ok("startedAt" in item)
+    assert.ok("startedBy" in item)
+  }
+})
+
+test("templates, repeat and restore create tasks without copying a live lock", () => {
+  const { store } = openStore()
+  const created = patientWithChief(store, "right")
+  store.addItem({
+    deviceId: "doc",
+    entryId: created.entry.id,
+    targetId: "knee",
+    equipmentTypeId: "ultrasound",
+    equipmentUnitId: "ultrasound-1",
+  })
+  const item = store.entryById(created.entry.id).items[0]
+  store.patchItem({
+    deviceId: "doc",
+    entryId: created.entry.id,
+    itemId: item.id,
+    patch: { started: true },
+  })
+  const snapshot = store.entryView("doc", created.entry.id).entry.items[0]
+  assert.ok(snapshot.startedAt)
+
+  store.saveTemplateFromEntry({ deviceId: "doc", entryId: created.entry.id, name: "设备模板" })
+  const templateId = store.state.templates[0].id
+  const fromTemplate = store.createPatientFromTemplate({ deviceId: "doc", name: "模板阿姨", templateId })
+  assert.equal(fromTemplate.entry.items[0].startedAt, null)
+  assert.equal(fromTemplate.entry.items[0].startedBy, null)
+
+  store.removeItem({ deviceId: "doc", entryId: created.entry.id, itemId: item.id })
+  const restored = store.restoreItem({
+    deviceId: "doc",
+    entryId: created.entry.id,
+    index: 0,
+    item: snapshot,
+    afterIds: [],
+  })
+  assert.equal(restored.entry.items[0].startedAt, null)
+  assert.equal(restored.entry.items[0].startedBy, null)
+
+  // 照上次的单：昨天的 started 任务复制到今天后必须重新开始确认。
+  const repeatStore = openStore().store
+  const repeatPatient = patientWithChief(repeatStore, "right")
+  repeatStore.addItem({
+    deviceId: "doc",
+    entryId: repeatPatient.entry.id,
+    targetId: "knee",
+    equipmentTypeId: "ultrasound",
+    equipmentUnitId: "ultrasound-1",
+  })
+  const repeatItem = repeatStore.entryById(repeatPatient.entry.id).items[0]
+  repeatStore.patchItem({
+    deviceId: "doc",
+    entryId: repeatPatient.entry.id,
+    itemId: repeatItem.id,
+    patch: { started: true },
+  })
+  const today = todayKey()
+  const days = { ...repeatStore.state.days }
+  days["2020-01-01"] = days[today]
+  delete days[today]
+  repeatStore.state.days = days
+  const repeated = repeatStore.repeatLastDay({ deviceId: "doc", patientId: repeatPatient.entry.patientId })
+  assert.equal(repeated.entry.items[0].startedAt, null)
+  assert.equal(repeated.entry.items[0].startedBy, null)
+})

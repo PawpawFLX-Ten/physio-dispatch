@@ -609,6 +609,18 @@ export function PatientDay({ entryId, initial, pulse, live = true, onBack }) {
     )
   }
 
+  // 开始/结束使用只改当前设备项。409（机台占用/使用中换机）由 mutate 保留错误并 reload 当前单。
+  function setActiveEquipmentStarted(started) {
+    if (!activeItem || !activeEquipment || pending) return
+    return mutate(
+      () => withVersion((v) => api.patchItem(entryId, activeItem.id, { started }, v)),
+      {
+        success: started ? "已开始使用设备" : "已结束使用",
+        fail: "未能保存",
+      },
+    )
+  }
+
   // 设备/模板选择完成后只调用一次 addItem；服务端负责默认参数、自动机台和模板关联目标。
   function addEquipmentChoice(extra, label) {
     if (!equipmentTarget || pending) return
@@ -1333,6 +1345,7 @@ export function PatientDay({ entryId, initial, pulse, live = true, onBack }) {
               pending={pending}
               onSaveParameters={saveActiveEquipmentParameters}
               onSelectUnit={selectActiveEquipmentUnit}
+              onSetStarted={setActiveEquipmentStarted}
             />
           ) : null}
           <p className="patient-label">手法</p>

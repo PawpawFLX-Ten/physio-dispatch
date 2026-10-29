@@ -13,7 +13,8 @@
     "optimize:body": "node scripts/optimize-body.mjs",
     "icons": "node scripts/make-icons.mjs",
     "lint": "eslint .",
-    "test:equipment": "node scripts/equipment-e2e.mjs"
+    "test:equipment": "node scripts/equipment-e2e.mjs",
+    "test:all": "npm test && npm run lint && npm run build && npm run test:ui && npm run test:equipment"
   },
   "dependencies": {
     "compression": "^1.8.2",

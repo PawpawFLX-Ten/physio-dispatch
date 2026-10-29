@@ -511,9 +511,14 @@
   white-space: nowrap;
 }
 
-.today-equipment-state.is-done {
+.today-equipment-state.is-done,
+.today-equipment-state.is-in-use {
   background: var(--accent-bg);
   color: var(--accent);
+}
+
+.today-equipment-state.is-in-use {
+  font-weight: 800;
 }
 
 .today-equipment-badge {
@@ -527,9 +532,15 @@
 }
 
 .today-equipment-badge.is-occupied,
-.today-equipment-badge.is-done {
+.today-equipment-badge.is-done,
+.today-equipment-badge.is-in-use {
   background: var(--accent-bg);
   color: var(--accent);
+}
+
+.today-equipment-badge.is-in-use {
+  box-shadow: inset 0 0 0 1px var(--accent);
+  font-weight: 800;
 }
 
 .today-equipment-badge.is-queued {
@@ -662,6 +673,237 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 我的任务：跨病人扁平队列；动作按钮在行外，避免按钮套按钮。 */
+.today-my-queue {
+  padding-bottom: 8px;
+}
+
+.today-my-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.today-my-wrap {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.today-my-task {
+  width: 100%;
+  min-height: 76px;
+  padding: 10px 12px;
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
+}
+
+.today-my-task:active {
+  background: var(--press);
+}
+
+.today-my-wrap.is-started .today-my-task {
+  box-shadow: inset 3px 0 0 var(--accent), inset 0 0 0 1px var(--line);
+}
+
+.today-my-order {
+  display: grid;
+  place-items: center;
+  min-height: 30px;
+  border-radius: 8px;
+  background: var(--card-2);
+  color: var(--muted-2);
+  font-size: 14px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.today-my-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.today-my-top {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  min-width: 0;
+}
+
+.today-my-patient {
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.today-my-target {
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.today-my-detail {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.today-my-note {
+  color: var(--danger-strong);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.today-my-use {
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.today-my-state {
+  border-radius: 999px;
+  padding: 2px 8px;
+  background: var(--card-2);
+  color: var(--muted-2);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.today-my-state.is-started {
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+
+.today-my-actions {
+  min-width: 86px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
+}
+
+.today-my-action {
+  min-height: 44px;
+  padding: 0 10px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.today-my-action:disabled {
+  opacity: 0.55;
+}
+
+.today-my-completed {
+  margin: 14px 2px 0;
+  color: var(--muted-2);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+/* 按人视图的移交入口与弹层。 */
+.today-staff-title {
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.today-staff-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.today-handoff-btn {
+  border: 0;
+  border-radius: 999px;
+  min-height: 44px;
+  padding: 0 12px;
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.today-handoff-sheet {
+  max-height: min(72vh, 560px);
+}
+
+.today-handoff-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.today-handoff-heading > div {
+  min-width: 0;
+}
+
+.today-handoff-heading p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.today-handoff-heading > .today-gear {
+  flex-shrink: 0;
+}
+
+.today-handoff-hint {
+  margin: 10px 0 0;
+  color: var(--muted-2);
+  font-size: 13px;
+}
+
+.today-handoff-error {
+  margin: 8px 0 0;
+}
+
+.today-handoff-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.today-handoff-person {
+  width: 100%;
+  min-height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  text-align: left;
+}
+
+.today-handoff-person span:last-child {
+  color: var(--muted-2);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.today-handoff-person:disabled {
+  opacity: 0.6;
 }
 
 /* 今日单全局吩咐：底部弹层里完成选病人、说一句、预览、提交。 */

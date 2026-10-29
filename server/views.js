@@ -29,6 +29,7 @@ export const viewMethods = {
       // 单人治疗室的界面差异（收起派工、行内完成口径）以服务端这份为准，别三处各算各的。
       solo: this.state.staff.length === 1,
       today: this.todayList(meId),
+      myTasks: this.myTasks(meId),
       todayByStaff: this.todayByStaff(),
       todayByEquipment: this.todayByEquipment(),
       ...equipmentCatalog,
@@ -146,6 +147,66 @@ export const viewMethods = {
       .filter(Boolean)
   },
 
+  // 我的任务：跨病人把今天所有属于当前员工的项按真实工作顺序摊平。
+  // done 项也保留，由前端决定“待办/已完”如何排序；单人房不依赖派工字段。
+  myTasks(meId) {
+    if (!meId) return []
+    const solo = this.state.staff.length === 1
+    const tasks = []
+    let order = 0
+    for (const entry of this.todayRecord().entries || []) {
+      const patient = this.state.patients.find((item) => item.id === entry.patientId)
+      for (const item of entry.items || []) {
+        order += 1
+        if (!patient) continue
+        if (!solo && item.assigneeId !== meId) continue
+        const assignee = this.state.staff.find((person) => person.id === item.assigneeId)
+        const starter = this.state.staff.find((person) => person.id === item.startedBy)
+        const type = equipmentTypeById(item.equipmentTypeId)
+        const linkedTargets = Array.isArray(item.linkedTargets) ? structuredClone(item.linkedTargets) : []
+        tasks.push({
+          itemId: item.id,
+          entryId: entry.id,
+          entryVersion: entryVersion(entry),
+          patientId: patient.id,
+          patientName: patient.name,
+          note: patient.note || "",
+          order,
+          targetId: item.targetId,
+          targetTitle: targetTitle(item.targetId, item.side || null),
+          side: item.side || null,
+          technique: item.technique,
+          direction: item.direction,
+          dose:
+            item.dose && typeof item.dose === "object" && !Array.isArray(item.dose)
+              ? structuredClone(item.dose)
+              : {},
+          equipmentTypeId: item.equipmentTypeId || null,
+          equipmentTypeName: type?.name || "",
+          equipmentUnitId: item.equipmentUnitId || null,
+          equipmentUnitName: equipmentUnitName(item.equipmentUnitId),
+          equipmentSummary: equipmentSummaryForItem(item),
+          exerciseName: exerciseTemplateName(item.exerciseTemplateId),
+          parameters:
+            item.parameters && typeof item.parameters === "object" && !Array.isArray(item.parameters)
+              ? structuredClone(item.parameters)
+              : {},
+          linkedTargets,
+          linkedTargetTitles: linkedTargets.map((link) => targetTitle(link.targetId, link.side || null)).filter(Boolean),
+          assigneeId: item.assigneeId || null,
+          assigneeName: assignee?.name || "",
+          done: Boolean(item.done),
+          completedAt: item.completedAt || null,
+          startedAt: item.startedAt || null,
+          startedBy: item.startedBy || null,
+          startedByName: starter?.name || "",
+          started: Boolean(item.startedAt && item.startedBy),
+        })
+      }
+    }
+    return tasks
+  },
+
   entrySummary(entry, meId) {
     const patient = this.state.patients.find((item) => item.id === entry.patientId)
     if (!patient) return null
@@ -224,7 +285,10 @@ export const viewMethods = {
     if (unassigned) groups.delete("none")
     const list = [...groups.values()]
     if (unassigned) list.push(unassigned)
-    for (const group of list) group.patients = [...group.patients.values()]
+    for (const group of list) {
+      group.patients = [...group.patients.values()]
+      group.open = group.total - group.done
+    }
     return list
   },
 
@@ -283,6 +347,7 @@ export const viewMethods = {
         }
         const group = groups.get(key)
         const assignee = this.state.staff.find((person) => person.id === item.assigneeId)
+        const starter = this.state.staff.find((person) => person.id === item.startedBy)
         const task = {
           order,
           entryId: entry.id,
@@ -293,6 +358,10 @@ export const viewMethods = {
           assigneeName: assignee?.name || "",
           done: Boolean(item.done),
           completedAt: item.completedAt || null,
+          startedAt: item.startedAt || null,
+          startedBy: item.startedBy || null,
+          startedByName: starter?.name || "",
+          started: Boolean(item.startedAt && item.startedBy),
           equipmentTypeId: type?.id || null,
           equipmentTypeName: typeName,
           equipmentUnitId: typeof item.equipmentUnitId === "string" ? item.equipmentUnitId : null,
@@ -312,14 +381,24 @@ export const viewMethods = {
     return [...groups.values()].map((group) => {
       group.tasks.sort((left, right) => left.order - right.order)
       const openTasks = group.tasks.filter((task) => !task.done)
-      const currentTask = openTasks[0] || null
+      const activeTask = openTasks.find((task) => task.startedAt) || null
+      // 真在用的机台优先展示开始者；没有 started 时仍按队列第一项做软占用提示。
+      const currentTask = activeTask || openTasks[0] || null
       return {
         ...group,
         doneCount: group.done,
         openCount: openTasks.length,
         queuedCount: Math.max(0, openTasks.length - 1),
+        activeTask,
         currentTask,
-        status: group.total === 0 ? "available" : openTasks.length === 0 ? "done" : "occupied",
+        status:
+          activeTask
+            ? "in_use"
+            : group.total === 0
+              ? "available"
+              : openTasks.length === 0
+                ? "done"
+                : "occupied",
         items: group.tasks,
       }
     })
@@ -351,6 +430,7 @@ export const viewMethods = {
     const assignee = this.state.staff.find((person) => person.id === item.assigneeId)
     const closer = this.state.staff.find((person) => person.id === item.completedBy)
     const type = equipmentTypeById(item.equipmentTypeId)
+    const starter = this.state.staff.find((person) => person.id === item.startedBy)
     const linkedTargets = Array.isArray(item.linkedTargets) ? structuredClone(item.linkedTargets) : []
     return {
       ...item,
@@ -373,6 +453,10 @@ export const viewMethods = {
       completedBy: item.completedBy || null,
       completedAt: item.completedAt || null,
       completedByName: closer?.name || "",
+      startedAt: item.startedAt || null,
+      startedBy: item.startedBy || null,
+      startedByName: starter?.name || "",
+      started: Boolean(item.startedAt && item.startedBy),
     }
   },
 

@@ -101,6 +101,7 @@ app.delete(
 app.post("/api/today/entries", asyncRoute((req) => store.addExisting(req.body)))
 app.post("/api/today/entries/repeat-last", asyncRoute((req) => store.repeatLastDay(req.body)))
 app.post("/api/today/entries/carry-unfinished", asyncRoute((req) => store.carryUnfinished(req.body)))
+app.post("/api/today/reassign-open", asyncRoute((req) => store.reassignOpen(req.body)))
 app.get("/api/entries/:id", asyncRoute((req) => store.entryView(req.query.deviceId, req.params.id)))
 app.post("/api/entries/:id/conditions", asyncRoute((req) => store.addCondition({ ...req.body, entryId: req.params.id })))
 app.post("/api/entries/:id/chief", asyncRoute((req) => store.setChief({ ...req.body, entryId: req.params.id })))
