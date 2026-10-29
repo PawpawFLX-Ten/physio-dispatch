@@ -556,3 +556,99 @@ test("knee and neck can be equipment targets while remaining unavailable for man
   assert.equal(item.side, null)
   assert.equal(item.equipmentUnitId, "traction-bed-1")
 })
+
+test("equipment patch edits schema parameters and switches a unit without changing type", () => {
+  const { store } = openStore()
+  const created = patientWithChief(store, "right")
+  store.addItem({
+    deviceId: "doc",
+    entryId: created.entry.id,
+    targetId: "quad",
+    side: "right",
+    equipmentTypeId: "ultrasound",
+    equipmentUnitId: "ultrasound-1",
+  })
+  const item = store.entryById(created.entry.id).items[0]
+  const changed = store.patchItem({
+    deviceId: "doc",
+    entryId: created.entry.id,
+    itemId: item.id,
+    patch: { parameters: { intensity: 1.7, minutes: 11 } },
+  })
+  const edited = changed.entry.items[0]
+  assert.equal(edited.equipmentTypeId, "ultrasound")
+  assert.equal(edited.parameters.intensity, 1.7)
+  assert.equal(edited.parameters.minutes, 11)
+  assert.equal(edited.parameters.mode, "continuous")
+
+  const switched = store.patchItem({
+    deviceId: "doc",
+    entryId: created.entry.id,
+    itemId: item.id,
+    patch: { equipmentUnitId: "ultrasound-2" },
+  })
+  assert.equal(switched.entry.items[0].equipmentUnitId, "ultrasound-2")
+  assert.throws(
+    () =>
+      store.patchItem({
+        deviceId: "doc",
+        entryId: created.entry.id,
+        itemId: item.id,
+        patch: { equipmentUnitId: "traction-bed-1" },
+      }),
+    /机.*设备类型不匹配/,
+  )
+  assert.equal(store.entryById(created.entry.id).items[0].equipmentUnitId, "ultrasound-2")
+
+  store.addItem({ deviceId: "doc", entryId: created.entry.id, targetId: "quad", side: "right", technique: "massage", direction: "along", dose: { minutes: 8 } })
+  const manual = store.entryById(created.entry.id).items.at(-1)
+  assert.throws(
+    () =>
+      store.patchItem({
+        deviceId: "doc",
+        entryId: created.entry.id,
+        itemId: manual.id,
+        patch: { parameters: { minutes: 4 } },
+      }),
+    /只有设备项/,
+  )
+})
+
+test("todayByEquipment shows idle units plus soft current/queued occupancy", () => {
+  const { store } = openStore()
+  const first = patientWithChief(store, "right", "右膝疼痛")
+  const second = store.createPatient({ deviceId: "doc", name: "李叔", conditionName: "左肩痛" })
+  store.setChief({ deviceId: "doc", entryId: second.entry.id, targetId: "shoulder", side: "left" })
+
+  const idleView = store.view("doc")
+  assert.equal(idleView.todayByEquipment.length, 8)
+  assert.ok(idleView.todayByEquipment.every((group) => group.status === "available" && group.openCount === 0))
+
+  store.addItem({
+    deviceId: "doc",
+    entryId: first.entry.id,
+    targetId: "quad",
+    equipmentTypeId: "ultrasound",
+    equipmentUnitId: "ultrasound-1",
+  })
+  store.addItem({
+    deviceId: "doc",
+    entryId: second.entry.id,
+    targetId: "supraspinatus",
+    equipmentTypeId: "ultrasound",
+    equipmentUnitId: "ultrasound-1",
+  })
+  const occupied = store.view("doc").todayByEquipment.find((group) => group.equipmentUnitId === "ultrasound-1")
+  assert.equal(occupied.status, "occupied")
+  assert.equal(occupied.openCount, 2)
+  assert.equal(occupied.queuedCount, 1)
+  assert.equal(occupied.currentTask.patientName, "王阿姨")
+  assert.equal(occupied.tasks.length, 2)
+
+  const currentItem = store.entryById(first.entry.id).items[0]
+  store.patchItem({ deviceId: "doc", entryId: first.entry.id, itemId: currentItem.id, patch: { done: true } })
+  const advanced = store.view("doc").todayByEquipment.find((group) => group.equipmentUnitId === "ultrasound-1")
+  assert.equal(advanced.currentTask.patientName, "李叔")
+  assert.equal(advanced.queuedCount, 0)
+  assert.equal(advanced.openCount, 1)
+})

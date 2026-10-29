@@ -124,6 +124,70 @@ export function equipmentParameterSummary(item, equipmentTypes) {
     .join(" · ")
 }
 
+export function equipmentParameterFields(type) {
+  return Array.isArray(type?.parameterSchema)
+    ? type.parameterSchema.filter((field) => field && typeof field.key === "string" && field.key)
+    : []
+}
+
+// 编辑草稿的起点：已存参数优先，缺字段用 schema default 补齐。
+export function buildEquipmentParameterDraft(item, type) {
+  const parameters = item?.parameters && typeof item.parameters === "object" ? item.parameters : {}
+  const draft = {}
+  for (const field of equipmentParameterFields(type)) {
+    const stored = Object.prototype.hasOwnProperty.call(parameters, field.key) ? parameters[field.key] : undefined
+    draft[field.key] = stored === undefined || stored === null ? field.default ?? "" : stored
+  }
+  return draft
+}
+
+function parameterOptionValues(field) {
+  return (field?.options || []).map((option) => (typeof option === "string" ? option : option.value))
+}
+
+function comparableParameter(field, value) {
+  if (field?.type === "number") {
+    const number = Number(value)
+    return Number.isFinite(number) ? number : value
+  }
+  if (field?.type === "boolean") return Boolean(value)
+  return value
+}
+
+// 表单草稿 → 可提交数值；同时判断是否与当前项不同。invalid 时按钮禁用，不发 patch。
+export function equipmentParameterDraftState(item, type, draft) {
+  const fields = equipmentParameterFields(type)
+  const values = {}
+  let invalid = false
+  for (const field of fields) {
+    const raw = draft?.[field.key]
+    if (field.type === "number") {
+      if (raw === "" || raw === null || raw === undefined || !Number.isFinite(Number(raw))) {
+        invalid = true
+        continue
+      }
+      values[field.key] = Number(raw)
+    } else if (field.type === "select") {
+      const options = parameterOptionValues(field)
+      const value = raw === "" || raw === null || raw === undefined ? String(field.default ?? "") : String(raw)
+      if (options.length && !options.includes(value)) {
+        invalid = true
+        continue
+      }
+      values[field.key] = value
+    } else if (field.type === "boolean") {
+      values[field.key] = Boolean(raw)
+    } else {
+      values[field.key] = raw
+    }
+  }
+  const current = buildEquipmentParameterDraft(item, type)
+  const changed = !invalid && fields.some(
+    (field) => comparableParameter(field, values[field.key]) !== comparableParameter(field, current[field.key]),
+  )
+  return { fields, values: invalid ? null : values, invalid, changed }
+}
+
 // 选设备时还没入库：把 schema 默认值显示出来，和服务端稍后实际落库的值一致。
 export function equipmentDefaultParameterSummary(type) {
   const defaults = type?.defaultParameters || {}

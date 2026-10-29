@@ -16,6 +16,7 @@ import {
 import { itemsOnSpot } from "@shared/body-marks.js"
 import { useBackLayer } from "../back-layer.js"
 import { BodyStage } from "./BodyStage.jsx"
+import { EquipmentEditor } from "./patient/EquipmentEditor.jsx"
 import { EquipmentPicker } from "./patient/EquipmentPicker.jsx"
 import { ListPicker } from "./patient/ListPicker.jsx"
 import { DoseControl, PlanList } from "./patient/PlanList.jsx"
@@ -24,7 +25,6 @@ import {
   blankNotice,
   clockOf,
   conditionText,
-  equipmentParameterSummary,
   isConflictError,
   isEquipmentItem,
   isPastMidnightError,
@@ -589,6 +589,26 @@ export function PatientDay({ entryId, initial, pulse, live = true, onBack }) {
     })
   }
 
+  // 设备编辑只 patch 当前项的 parameters / equipmentUnitId，不在这里换设备类型或模板。
+  function saveActiveEquipmentParameters(parameters) {
+    if (!activeItem || !activeEquipment || pending) return
+    return mutate(
+      () => withVersion((v) => api.patchItem(entryId, activeItem.id, { parameters }, v)),
+      { success: "设备参数已保存", fail: "未能保存" },
+    )
+  }
+
+  function selectActiveEquipmentUnit(equipmentUnitId) {
+    if (!activeItem || !activeEquipment || pending) return
+    return mutate(
+      () => withVersion((v) => api.patchItem(entryId, activeItem.id, { equipmentUnitId }, v)),
+      {
+        success: equipmentUnitId ? "已切换机台" : "已改为自动分配",
+        fail: "未能保存",
+      },
+    )
+  }
+
   // 设备/模板选择完成后只调用一次 addItem；服务端负责默认参数、自动机台和模板关联目标。
   function addEquipmentChoice(extra, label) {
     if (!equipmentTarget || pending) return
@@ -787,8 +807,12 @@ export function PatientDay({ entryId, initial, pulse, live = true, onBack }) {
     ? equipmentTypes.find((type) => type.id === activeItem.equipmentTypeId) || null
     : null
   const activeEquipment = Boolean(activeItem && isEquipmentItem(activeItem))
-  const activeParameterText = activeEquipment ? equipmentParameterSummary(activeItem, equipmentTypes) : ""
   const activeLinkedTitles = activeEquipment ? linkedTargetTitles(activeItem) : []
+  // 器械参数设备用 schema 表单，不再显示不适用的组次；手工项仍保留分钟剂量。
+  const showActiveDose = !activeEquipment || activeEquipmentType?.doseMode === "setsReps"
+  const activeEquipmentEditorKey = activeItem
+    ? `${activeItem.id}:${activeItem.equipmentTypeId || "legacy"}:${JSON.stringify(activeItem.parameters || {})}`
+    : ""
   const chiefTitle = entry.chiefSiteId
     ? targetTitle(entry.chiefSiteId, hasSides(targetById(entry.chiefSiteId)) ? entry.chiefSide : null)
     : ""
@@ -1300,34 +1324,16 @@ export function PatientDay({ entryId, initial, pulse, live = true, onBack }) {
         <Sheet title={targetTitle(activeItem.targetId, activeItem.side)} onClose={() => setActiveItemId(null)}>
           <Notice notice={notice} />
           {activeEquipment ? (
-            <section className="patient-equipment-readonly" aria-label="设备信息，只读">
-              <p className="patient-equipment-readonly-title">设备信息 · 只读</p>
-              <dl>
-                <div>
-                  <dt>设备</dt>
-                  <dd>{activeItem.equipmentTypeName || activeEquipmentType?.name || activeItem.equipmentSummary || "器械"}</dd>
-                </div>
-                <div>
-                  <dt>机台</dt>
-                  <dd>
-                    {activeItem.equipmentUnitName ||
-                      (activeEquipmentType?.requiresUnit === false ? "共享设备，不占机台" : "自动安排")}
-                  </dd>
-                </div>
-                <div>
-                  <dt>模板</dt>
-                  <dd>{activeItem.exerciseName || "未使用动作模板"}</dd>
-                </div>
-                <div>
-                  <dt>参数</dt>
-                  <dd>{activeParameterText || "默认参数"}</dd>
-                </div>
-              </dl>
-              {activeLinkedTitles.length ? (
-                <p className="patient-equipment-linked">{`关联 ${activeLinkedTitles.join(" · ")}`}</p>
-              ) : null}
-              <p className="patient-equipment-readonly-hint">参数暂为只读；完成、改派、删除和下面的组次调整保持原有操作。</p>
-            </section>
+            <EquipmentEditor
+              key={activeEquipmentEditorKey}
+              item={activeItem}
+              type={activeEquipmentType}
+              units={equipmentUnits}
+              linkedTitles={activeLinkedTitles}
+              pending={pending}
+              onSaveParameters={saveActiveEquipmentParameters}
+              onSelectUnit={selectActiveEquipmentUnit}
+            />
           ) : null}
           <p className="patient-label">手法</p>
           <div className="patient-techniques">
@@ -1402,7 +1408,7 @@ export function PatientDay({ entryId, initial, pulse, live = true, onBack }) {
               </div>
             </>
           ) : null}
-          {!(activeEquipment && activeEquipmentType?.doseMode === "parameters") ? (
+          {showActiveDose ? (
             <>
           <p className="patient-label">剂量</p>
           <div className="patient-stack">
@@ -1470,7 +1476,7 @@ export function PatientDay({ entryId, initial, pulse, live = true, onBack }) {
           </div>
             </>
           ) : (
-            <p className="patient-equipment-dose-note">设备参数见上方只读摘要；组次剂量不适用于这类设备。</p>
+            <p className="patient-equipment-dose-note">设备参数见上方编辑区；这类设备不使用组次剂量。</p>
           )}
           <p className="patient-label">派给谁</p>
           <div className="patient-stack">

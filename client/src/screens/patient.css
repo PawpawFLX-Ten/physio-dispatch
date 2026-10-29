@@ -886,8 +886,8 @@
   overflow-wrap: anywhere;
 }
 
-/* 操作卡里的设备信息只读：参数编辑本轮不做，不生成看不出范围的输入控件。 */
-.patient-equipment-readonly {
+/* 操作卡里的设备参数/机台编辑器：表单和点选均保持 >=44px。 */
+.patient-equipment-editor {
   margin: 0 0 16px;
   padding: 12px 14px;
   border-radius: 14px;
@@ -895,48 +895,128 @@
   box-shadow: inset 0 0 0 1px var(--line);
 }
 
-.patient-equipment-readonly-title {
+.patient-equipment-editor-head h3 {
   margin: 0 0 8px;
-  color: var(--accent);
-  font-size: 16px;
-  font-weight: 700;
+  font-size: 22px;
+  line-height: 1.25;
 }
 
-.patient-equipment-readonly dl {
+.patient-equipment-editor-head dl {
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 5px;
   margin: 0;
 }
 
-.patient-equipment-readonly dl > div {
+.patient-equipment-editor-head dl > div {
   display: grid;
   grid-template-columns: 4em minmax(0, 1fr);
   gap: 8px;
 }
 
-.patient-equipment-readonly dt {
+.patient-equipment-editor-head dt {
   color: var(--muted);
-  font-size: 15px;
+  font-size: 14px;
 }
 
-.patient-equipment-readonly dd {
+.patient-equipment-editor-head dd {
   margin: 0;
-  font-size: 16px;
+  font-size: 15px;
   line-height: 1.4;
   overflow-wrap: anywhere;
 }
 
-.patient-equipment-linked,
-.patient-equipment-readonly-hint {
-  margin: 8px 0 0;
-  color: var(--muted);
-  font-size: 14px;
-  line-height: 1.4;
+.patient-equipment-parameter-form {
+  margin: 14px 0 16px;
 }
 
-.patient-equipment-readonly-hint {
+.patient-equipment-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.patient-equipment-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.patient-equipment-field input,
+.patient-equipment-field select {
+  width: 100%;
+  min-height: 48px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0 10px;
+  background: var(--card);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 16px;
+}
+
+.patient-equipment-field input:focus-visible,
+.patient-equipment-field select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.patient-equipment-error {
+  margin: 0 0 8px;
+  color: var(--danger);
+  font-size: 14px;
+}
+
+.patient-equipment-save {
+  min-height: 52px;
+}
+
+.patient-equipment-unit-editor {
+  margin-bottom: 12px;
+}
+
+.patient-equipment-unit-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.patient-equipment-unit-choice {
+  min-height: 44px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--line);
+  font-size: 15px;
+}
+
+.patient-equipment-unit-choice.is-on {
+  background: var(--accent);
+  color: var(--bg);
+  box-shadow: none;
+}
+
+.patient-equipment-note,
+.patient-equipment-editor-hint,
+.patient-equipment-dose-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.patient-equipment-editor-hint {
   color: var(--soft);
+}
+
+.patient-equipment-dose-note {
+  margin-bottom: 16px;
 }
 
 .patient-quick-assignee {

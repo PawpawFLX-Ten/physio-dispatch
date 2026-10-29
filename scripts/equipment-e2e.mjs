@@ -1,4 +1,4 @@
-/* global document, PointerEvent, localStorage, HTMLInputElement, Event */
+/* global document, window, PointerEvent, localStorage, HTMLInputElement, Event */
 // 设备专项浏览器回归：临时数据 + 独立构建目录 + 独立端口，不碰真实 data/。
 import { spawn, spawnSync } from "node:child_process"
 import fs from "node:fs"
@@ -99,6 +99,21 @@ async function waitGone(page, part, timeout = 12000) {
   }
   throw new Error(`仍然可见：${part}`)
 }
+async function waitClinic(predicate, label, timeout = 12000) {
+  const start = Date.now()
+  let latest = null
+  while (Date.now() - start < timeout) {
+    try {
+      latest = JSON.parse(fs.readFileSync(path.join(dataDir, "clinic.json"), "utf8"))
+      if (predicate(latest)) return latest
+    } catch {
+      /* 正在原子替换文件时可能短暂读不到 */
+    }
+    await sleep(150)
+  }
+  throw new Error(`等待落库超时：${label}`)
+}
+
 async function clickButton(page, name) {
   const clicked = await page.evaluate((label) => {
     const buttons = [...document.querySelectorAll("button")]
@@ -136,6 +151,20 @@ async function tapBody(page, name, yaw = 0) {
     view.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, clientX, clientY, pointerId: 1, button: 0 }))
     view.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, clientX, clientY, pointerId: 1, button: 0 }))
   }, { targetName: name, yawValue: yaw })
+}
+
+async function tapPlanRow(page, includes) {
+  const tapped = await page.evaluate((needleText) => {
+    const row = [...document.querySelectorAll(".patient-row")].find((node) => node.textContent.includes(needleText))
+    const main = row?.querySelector(".patient-row-main")
+    if (!main) return false
+    const rect = main.getBoundingClientRect()
+    const point = { clientX: rect.left + 20, clientY: rect.top + 20, pointerId: 71, button: 0 }
+    main.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, ...point }))
+    window.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, ...point }))
+    return true
+  }, includes)
+  if (!tapped) throw new Error(`找不到治疗行：${includes}`)
 }
 
 try {
@@ -205,6 +234,38 @@ try {
   await waitText(page, ["超声 1 号机", "小李"])
   console.log("3 一句话带设备和员工：通过")
 
+  // 参数编辑：打开超声任务，改强度并保存；再切到 2 号机。
+  await clickButton(page, "收起")
+  await tapPlanRow(page, "超声 1 号机")
+  await waitText(page, ["设备", "参数", "机台", "超声 1 号机"])
+  const changed = await page.evaluate(() => {
+    const field = [...document.querySelectorAll(".patient-equipment-field")].find((node) => node.textContent.includes("强度"))
+    const input = field?.querySelector("input")
+    if (!input) return false
+    const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set
+    set.call(input, "1.5")
+    input.dispatchEvent(new Event("input", { bubbles: true }))
+    return true
+  })
+  if (!changed) throw new Error("找不到超声强度输入框")
+  await page.getByRole("button", { name: "保存参数", exact: true }).click()
+  await waitClinic(
+    (data) => Object.values(data.days)
+      .flatMap((day) => day.entries)
+      .flatMap((entry) => entry.items)
+      .some((item) => item.equipmentTypeId === "ultrasound" && item.parameters?.intensity === 1.5),
+    "超声强度 1.5",
+  )
+  await page.getByRole("button", { name: "超声 2 号机", exact: true }).click()
+  await waitClinic(
+    (data) => Object.values(data.days)
+      .flatMap((day) => day.entries)
+      .flatMap((entry) => entry.items)
+      .some((item) => item.equipmentTypeId === "ultrasound" && item.equipmentUnitId === "ultrasound-2"),
+    "切换超声 2 号机",
+  )
+  console.log("4 设备参数编辑与机台切换：通过")
+
   const saved = JSON.parse(fs.readFileSync(path.join(dataDir, "clinic.json"), "utf8"))
   const entry = Object.values(saved.days).flatMap((day) => day.entries).find((row) => row.id === patient.entry.id)
   const equipmentItems = entry.items.filter((item) => item.equipmentTypeId)
@@ -218,7 +279,7 @@ try {
   if ([shockwave, band, ultrasound].some((item) => item.side !== "left" && item.side !== "right")) {
     throw new Error("设备任务出现空侧")
   }
-  console.log("4 设备、机台、参数、关联目标、派工、侧别落库：通过")
+  console.log("5 设备、机台、参数、关联目标、派工、侧别落库：通过")
 
   await clickButton(page, "收起")
   await clickButton(page, "返回")
@@ -226,8 +287,35 @@ try {
   if (afterBack.includes("今天的改动要记回病症吗")) await clickButton(page, "留在今天")
   await waitText(page, ["今日单"])
   await clickButton(page, "按设备")
-  await waitText(page, ["冲击波", "超声", "弹力带终末伸膝", "设备测试阿姨", "膝盖"])
-  console.log("5 今日单按设备视图展示设备任务：通过")
+  await waitText(page, ["冲击波", "超声 1 号机", "超声 2 号机", "弹力带", "空闲"])
+  await waitText(page, ["当前：", "设备测试阿姨"])
+  console.log("6 今日单按设备视图展示软占用/空闲状态：通过")
+
+  // 今日单全局吩咐：选今天已有病人，一句话再派 1 项。
+  const beforeCommand = JSON.parse(fs.readFileSync(path.join(dataDir, "clinic.json"), "utf8"))
+  const beforeItemCount = Object.values(beforeCommand.days).flatMap((day) => day.entries).find((row) => row.id === patient.entry.id).items.length
+  await clickButton(page, "吩咐")
+  await waitText(page, ["选今天已在单上的病人", "设备测试阿姨"])
+  await page.locator(".today-command-patient").filter({ hasText: "设备测试阿姨" }).click()
+  await waitText(page, ["换病人"])
+  await page.waitForSelector(".today-command-input", { state: "visible" })
+  await page.evaluate(() => {
+    const input = document.querySelector(".today-command-input")
+    const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set
+    set.call(input, "冈上肌按摩5分钟派给小李")
+    input.dispatchEvent(new Event("input", { bubbles: true }))
+  })
+  await waitText(page, ["派给 小李", "冈上肌", "按摩"])
+  await clickButton(page, "吩咐 1 项")
+  await waitText(page, ["已吩咐 1 项"])
+  const afterCommand = JSON.parse(fs.readFileSync(path.join(dataDir, "clinic.json"), "utf8"))
+  const afterEntry = Object.values(afterCommand.days).flatMap((day) => day.entries).find((row) => row.id === patient.entry.id)
+  if (afterEntry.items.length !== beforeItemCount + 1) throw new Error("全局吩咐没有新增一项")
+  const commanded = afterEntry.items.at(-1)
+  if (!commanded.assigneeId || commanded.targetId !== "supraspinatus" || commanded.technique !== "massage") {
+    throw new Error(`全局吩咐落库不对：${JSON.stringify(commanded)}`)
+  }
+  console.log("7 今日单全局吩咐入口：通过")
 
   if (pageErrors.length) throw new Error(`页面异常：${pageErrors.join(" | ")}`)
   console.log("EQUIPMENT_E2E_OK")

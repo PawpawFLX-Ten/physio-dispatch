@@ -146,6 +146,9 @@
   letter-spacing: -0.03em;
 }
 
+.today-empty p { margin: 0 0 12px; }
+.today-clear-search { width: 100%; max-width: 240px; }
+
 .today-row:active,
 .patient-row:active {
   background: var(--press);
@@ -382,6 +385,7 @@
 
 .today-equipment-title {
   align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
 }
 
@@ -512,6 +516,67 @@
   color: var(--accent);
 }
 
+.today-equipment-badge {
+  border-radius: 999px;
+  padding: 2px 8px;
+  background: var(--card-2);
+  color: var(--muted-2);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.today-equipment-badge.is-occupied,
+.today-equipment-badge.is-done {
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+
+.today-equipment-badge.is-queued {
+  background: var(--danger-bg);
+  color: var(--danger-strong);
+}
+
+.today-equipment-current {
+  margin: -2px 2px 8px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.today-equipment-current-label {
+  color: var(--ink-2);
+  font-weight: 700;
+}
+
+.today-equipment-task.is-current {
+  box-shadow: inset 3px 0 0 var(--accent), inset 0 0 0 1px var(--line);
+}
+
+.today-equipment-idle {
+  min-height: 48px;
+  margin: 0;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 12px;
+  background: var(--card-2);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--muted-2);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.today-equipment-idle-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: 0.65;
+}
+
 .today-note {
   color: var(--danger-strong);
   font-size: 17px;
@@ -555,7 +620,24 @@
 
 .today-sub-actions {
   display: flex;
+  align-items: center;
   gap: 4px;
+}
+
+.today-command-trigger {
+  border-radius: 999px;
+  padding: 0 12px;
+  background: var(--accent-bg);
+}
+
+.today-command-notice {
+  margin: 0 0 6px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-size: 14px;
+  font-weight: 700;
 }
 
 /* 实时连接断了：细条提示，重连成功自动消失。 */
@@ -580,6 +662,153 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 今日单全局吩咐：底部弹层里完成选病人、说一句、预览、提交。 */
+.today-command-sheet {
+  max-height: min(90vh, 780px);
+}
+
+.today-command-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.today-command-hint {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.today-command-heading > .today-gear {
+  flex-shrink: 0;
+}
+
+.today-command-error {
+  margin: 8px 0 0;
+}
+
+.today-command-selected {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 10px 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--card-2);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.today-command-selected strong {
+  font-size: 20px;
+}
+
+.today-command-selected p {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.today-command-change {
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: 10px;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.today-command-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.today-command-input,
+.today-command-search {
+  margin-bottom: 0;
+}
+
+.today-command-preview {
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--card-2);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.today-command-chief {
+  margin: 0 0 6px;
+  color: var(--accent);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.today-command-assignee {
+  margin: 0 0 6px;
+  color: var(--accent);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.today-command-assignee.is-default {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.today-command-items {
+  margin: 0 0 6px;
+  padding-left: 20px;
+}
+
+.today-command-items li {
+  font-size: 15px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.today-command-empty,
+.today-command-example,
+.today-command-loading {
+  margin: 8px 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.today-command-unknown {
+  margin: 6px 0 0;
+  color: var(--danger-strong);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.today-command-submit {
+  width: 100%;
+  min-height: 52px;
+}
+
+.today-command-patients {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.today-command-patient {
+  width: 100%;
+  min-height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  text-align: left;
+}
+
+.today-command-patient span:last-child {
+  color: var(--muted);
+  font-size: 14px;
+  text-align: right;
 }
 
 /* 设置页设备台账：默认折叠，只占一行，展开后按设备类型看机台。 */

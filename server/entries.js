@@ -52,11 +52,12 @@ function equipmentFieldsOf(item) {
   }
 }
 
-function equipmentUsageToday(store) {
+function equipmentUsageToday(store, skipItemId = null) {
   const usage = {}
   for (const entry of store.todayRecord().entries || []) {
     for (const item of entry.items || []) {
-      if (typeof item?.equipmentUnitId !== "string" || !item.equipmentUnitId) continue
+      if (!item || item.done || item.id === skipItemId) continue
+      if (typeof item.equipmentUnitId !== "string" || !item.equipmentUnitId) continue
       usage[item.equipmentUnitId] = (usage[item.equipmentUnitId] || 0) + 1
     }
   }
@@ -628,6 +629,7 @@ export const entryMethods = {
     const staff = this.requireStaff(deviceId)
     const entry = this.entryById(entryId)
     assertExpectedVersion(entry, expectedVersion)
+    if (!patch || typeof patch !== "object" || Array.isArray(patch)) fail(400, "改动格式不对")
     const item = entry.items.find((row) => row.id === itemId)
     if (!item) fail(404, "找不到这一项")
     // 只在改到会写回病症的字段（手法/方向/剂量/侧）时才重新问「记回病症」；
@@ -647,6 +649,44 @@ export const entryMethods = {
         item.linkedTargets = []
       }
       touched = true
+    }
+    if (hasOwn(patch, "parameters")) {
+      if (item.technique !== "equipment") fail(400, "只有设备项可以改设备参数")
+      if (!patch.parameters || typeof patch.parameters !== "object" || Array.isArray(patch.parameters)) {
+        fail(400, "设备参数格式不对")
+      }
+      const type = equipmentTypeById(item.equipmentTypeId)
+      const merged = {
+        ...(item.parameters && typeof item.parameters === "object" ? item.parameters : {}),
+        ...patch.parameters,
+      }
+      const nextParameters = sanitizeEquipmentParameters(type?.id || null, merged)
+      if (JSON.stringify(nextParameters) !== JSON.stringify(item.parameters || {})) touched = true
+      item.parameters = nextParameters
+    }
+    if (hasOwn(patch, "equipmentUnitId")) {
+      if (item.technique !== "equipment") fail(400, "只有设备项可以改机台")
+      const type = equipmentTypeById(item.equipmentTypeId)
+      if (!type) fail(400, "这项器械没有可切换的设备类型，请删除后重新选择")
+      let nextUnitId = patch.equipmentUnitId === null || patch.equipmentUnitId === "" ? null : patch.equipmentUnitId
+      if (type.requiresUnit) {
+        if (nextUnitId === null) {
+          try {
+            nextUnitId = chooseEquipmentUnitId(type.id, null, equipmentUsageToday(this, item.id))
+          } catch (error) {
+            fail(400, error.message)
+          }
+        } else {
+          const unit = equipmentUnitById(nextUnitId)
+          if (!unit || unit.equipmentTypeId !== type.id) fail(400, "这台机和设备类型不匹配")
+          nextUnitId = unit.id
+        }
+      } else {
+        if (nextUnitId) fail(400, "共享设备不占具体机台")
+        nextUnitId = null
+      }
+      if ((item.equipmentUnitId || null) !== nextUnitId) touched = true
+      item.equipmentUnitId = nextUnitId
     }
     if (patch.direction) {
       if (!DIRECTIONS.some((row) => row.id === patch.direction)) fail(400, "方向不对")

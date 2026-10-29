@@ -1,6 +1,8 @@
 // 读侧：把 state 投影成各页面要的样子。
 import { sideLabel, targetById, targetTitle } from "../shared/catalog.js"
 import {
+  EQUIPMENT_TYPES,
+  EQUIPMENT_UNITS,
   equipmentCatalogSnapshot,
   equipmentSummaryForItem,
   equipmentTypeById,
@@ -229,9 +231,32 @@ export const viewMethods = {
   // 今日设备视图：按“设备类型 + 具体机台”分桶，但组内保留全局工作顺序。
   // 旧 technique:"equipment" 但没有类型的数据归到 type=null 的“器械”桶，照样可读。
   todayByEquipment() {
+    // 先为所有设备类型/机台建桶：完全空闲的设备也要在“按设备”里可见。
     const groups = new Map()
+    for (const type of EQUIPMENT_TYPES) {
+      const units = EQUIPMENT_UNITS.filter((unit) => unit.equipmentTypeId === type.id).sort(
+        (left, right) => left.order - right.order,
+      )
+      const rows = type.requiresUnit ? units : [{ id: null, name: "", order: 0 }]
+      for (const unit of rows) {
+        const key = `${type.id}:${unit.id || "none"}`
+        groups.set(key, {
+          key,
+          equipmentTypeId: type.id,
+          equipmentTypeName: type.name,
+          equipmentUnitId: unit.id || null,
+          equipmentUnitName: unit.name || "",
+          name: [type.name, unit.name].filter(Boolean).join(" · "),
+          shared: !type.requiresUnit,
+          done: 0,
+          total: 0,
+          tasks: [],
+        })
+      }
+    }
+
     let order = 0
-    for (const entry of this.todayRecord().entries) {
+    for (const entry of this.todayRecord().entries || []) {
       const patient = this.state.patients.find((item) => item.id === entry.patientId)
       if (!patient) continue
       for (const item of entry.items || []) {
@@ -283,11 +308,21 @@ export const viewMethods = {
         if (item.done) group.done += 1
       }
     }
-    return [...groups.values()].map((group) => ({
-      ...group,
-      doneCount: group.done,
-      items: group.tasks,
-    }))
+
+    return [...groups.values()].map((group) => {
+      group.tasks.sort((left, right) => left.order - right.order)
+      const openTasks = group.tasks.filter((task) => !task.done)
+      const currentTask = openTasks[0] || null
+      return {
+        ...group,
+        doneCount: group.done,
+        openCount: openTasks.length,
+        queuedCount: Math.max(0, openTasks.length - 1),
+        currentTask,
+        status: group.total === 0 ? "available" : openTasks.length === 0 ? "done" : "occupied",
+        items: group.tasks,
+      }
+    })
   },
 
   patient(patientId) {

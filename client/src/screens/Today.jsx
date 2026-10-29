@@ -3,6 +3,7 @@ import { createPortal } from "react-dom"
 import { api } from "../api.js"
 import { matchesInitials } from "../pinyin.js"
 import { SettingsSheet } from "./SettingsSheet.jsx"
+import { TodayCommandSheet } from "./TodayCommandSheet.jsx"
 import { PULL_LIMIT, usePullToRefresh } from "../hooks/usePullToRefresh.js"
 import { useBackLayer } from "../back-layer.js"
 import "./today.css"
@@ -20,6 +21,8 @@ export function Today({ snap, live, changedBy, onRefresh, onSnap, onOpen }) {
   const [activeId, setActiveId] = useState(null)
   const [checked, setChecked] = useState([])
   const [settings, setSettings] = useState(false)
+  const [commandOpen, setCommandOpen] = useState(false)
+  const [commandNotice, setCommandNotice] = useState("")
   const [mineOnly, setMineOnly] = useState(false)
   const [staffView, setStaffView] = useState(false)
   const [equipmentView, setEquipmentView] = useState(false)
@@ -31,7 +34,7 @@ export function Today({ snap, live, changedBy, onRefresh, onSnap, onOpen }) {
   const pendingRef = useRef(false)
   const [pending, setPending] = useState(false)
   const { ref: scrollRef, pull, refreshing } = usePullToRefresh({
-    enabled: !open && !settings,
+    enabled: !open && !settings && !commandOpen,
     onRefresh,
     onSuccess: () => {
       setBanner("")
@@ -41,10 +44,17 @@ export function Today({ snap, live, changedBy, onRefresh, onSnap, onOpen }) {
   })
 
   // 返回键 / Escape 关弹层，而不是退出应用。
-  useBackLayer(open || settings, () => {
+  useBackLayer(open || settings || commandOpen, () => {
     setOpen(false)
     setSettings(false)
+    setCommandOpen(false)
   })
+
+  useEffect(() => {
+    if (!commandNotice) return undefined
+    const timer = window.setTimeout(() => setCommandNotice(""), 4000)
+    return () => window.clearTimeout(timer)
+  }, [commandNotice])
 
   async function run(task) {
     if (pendingRef.current) return
@@ -249,6 +259,11 @@ export function Today({ snap, live, changedBy, onRefresh, onSnap, onOpen }) {
   // 微信内置浏览器调不起系统打印：别放一个点了没反应的按钮。
   const canPrint = !/MicroMessenger/i.test(navigator.userAgent)
 
+  function finishCommand(count) {
+    setCommandOpen(false)
+    setCommandNotice(count ? `已吩咐 ${count} 项` : "已吩咐 0 项 · 要治的位置已更新")
+  }
+
   return (
     <main className="screen today">
       {/* 打印时只出这一块：一页纸的交班单 */}
@@ -279,6 +294,14 @@ export function Today({ snap, live, changedBy, onRefresh, onSnap, onOpen }) {
         <p className="muted today-sub">
           <span>{who}</span>
           <span className="today-sub-actions">
+            <button
+              type="button"
+              className="today-gear today-command-trigger"
+              aria-haspopup="dialog"
+              onClick={() => setCommandOpen(true)}
+            >
+              吩咐
+            </button>
             {canPrint ? (
               <button type="button" className="today-gear" onClick={() => window.print()}>
                 打印
@@ -290,8 +313,9 @@ export function Today({ snap, live, changedBy, onRefresh, onSnap, onOpen }) {
           </span>
         </p>
         {banner ? <p className="error">{banner}</p> : null}
+        {commandNotice ? <p className="today-command-notice" role="status">{commandNotice}</p> : null}
         {/* 弹层都关着时，行内完成这类主界面上的失败也要看得见：不能只弹回按钮。 */}
-        {error && !open && !settings ? (
+        {error && !open && !settings && !commandOpen ? (
           <p className="error today-error" role="alert">{error}</p>
         ) : null}
         {live === false ? (
@@ -367,45 +391,84 @@ export function Today({ snap, live, changedBy, onRefresh, onSnap, onOpen }) {
                 const title = group.equipmentUnitName && !baseTitle.includes(group.equipmentUnitName)
                   ? `${baseTitle} · ${group.equipmentUnitName}`
                   : baseTitle
+                const openCount = Number.isFinite(group.openCount)
+                  ? group.openCount
+                  : tasks.filter((task) => !task.done).length
+                const queuedCount = Number.isFinite(group.queuedCount)
+                  ? group.queuedCount
+                  : Math.max(0, openCount - 1)
+                const derivedStatus = tasks.length === 0 ? "available" : openCount > 0 ? "occupied" : "done"
+                const status = ["available", "done", "occupied"].includes(group.status)
+                  ? group.status
+                  : derivedStatus
+                const statusText = status === "occupied"
+                  ? queuedCount > 0 ? `排队 ${queuedCount} 项` : "当前"
+                  : status === "done" ? "今日完成" : "空闲"
+                const currentTask = status === "occupied"
+                  ? group.currentTask || tasks.find((task) => !task.done) || null
+                  : null
+                const currentKey = currentTask?.itemId || `${currentTask?.entryId}:${currentTask?.order}`
                 return (
                   <section key={group.key || group.equipmentUnitId || group.equipmentTypeId} className="today-group today-equipment-group">
                     <h2 className="today-group-title today-equipment-title">
                       <span className="today-equipment-group-name">{title}</span>
                       <span className="today-equipment-meta">
                         {group.shared ? <span className="today-equipment-shared">共享</span> : null}
+                        <span className={`today-equipment-badge is-${status}${queuedCount > 0 ? " is-queued" : ""}`}>
+                          {statusText}
+                        </span>
                         <span className="today-group-count">{`${done}/${total}`}</span>
                       </span>
                     </h2>
-                    <div className="today-list today-equipment-list">
-                      {tasks.map((task) => (
-                        <button
-                          key={task.itemId || `${task.entryId}-${task.order}`}
-                          type="button"
-                          className="row-btn today-equipment-task"
-                          onClick={() => onOpen(task.entryId)}
-                        >
-                          <span className="today-equipment-order" aria-label={`顺序 ${task.order}`}>
-                            {task.order ?? "·"}
-                          </span>
-                          <span className="today-equipment-body">
-                            <span className="today-equipment-patient">{task.patientName}</span>
-                            {task.targetTitle ? <span className="today-equipment-target">{task.targetTitle}</span> : null}
-                            <span className="today-equipment-summary">{task.equipmentSummary || title}</span>
-                            {task.linkedTargetTitles?.length ? (
-                              <span className="today-equipment-linked">{task.linkedTargetTitles.join("、")}</span>
-                            ) : null}
-                          </span>
-                          <span className="today-equipment-status">
-                            <span className={task.assigneeName ? "today-equipment-assignee" : "today-equipment-assignee is-unassigned"}>
-                              {task.assigneeName || "未派"}
-                            </span>
-                            <span className={task.done ? "today-equipment-state is-done" : "today-equipment-state"}>
-                              {task.done ? "已完成" : "未完成"}
-                            </span>
-                          </span>
-                        </button>
-                      ))}
-                    </div>
+                    {currentTask ? (
+                      <p className="today-equipment-current">
+                        <span className="today-equipment-current-label">当前：</span>
+                        {[currentTask.patientName, currentTask.assigneeName, currentTask.targetTitle]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </p>
+                    ) : null}
+                    {tasks.length === 0 ? (
+                      <p className="today-equipment-idle">
+                        <span className="today-equipment-idle-dot" aria-hidden="true" />
+                        空闲
+                      </p>
+                    ) : (
+                      <div className="today-list today-equipment-list">
+                        {tasks.map((task) => {
+                          const taskKey = task.itemId || `${task.entryId}:${task.order}`
+                          const isCurrent = status === "occupied" && currentKey === taskKey
+                          return (
+                            <button
+                              key={taskKey}
+                              type="button"
+                              className={isCurrent ? "row-btn today-equipment-task is-current" : "row-btn today-equipment-task"}
+                              onClick={() => onOpen(task.entryId)}
+                            >
+                              <span className="today-equipment-order" aria-label={`顺序 ${task.order}`}>
+                                {task.order ?? "·"}
+                              </span>
+                              <span className="today-equipment-body">
+                                <span className="today-equipment-patient">{task.patientName}</span>
+                                {task.targetTitle ? <span className="today-equipment-target">{task.targetTitle}</span> : null}
+                                <span className="today-equipment-summary">{task.equipmentSummary || title}</span>
+                                {task.linkedTargetTitles?.length ? (
+                                  <span className="today-equipment-linked">{task.linkedTargetTitles.join("、")}</span>
+                                ) : null}
+                              </span>
+                              <span className="today-equipment-status">
+                                <span className={task.assigneeName ? "today-equipment-assignee" : "today-equipment-assignee is-unassigned"}>
+                                  {task.assigneeName || "未派"}
+                                </span>
+                                <span className={task.done ? "today-equipment-state is-done" : "today-equipment-state"}>
+                                  {task.done ? "已完成" : "未完成"}
+                                </span>
+                              </span>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    )}
                   </section>
                 )
               })
@@ -439,10 +502,6 @@ export function Today({ snap, live, changedBy, onRefresh, onSnap, onOpen }) {
                 </section>
               ))
             )
-          ) : filteredToday.length === 0 ? (
-            <p className="today-empty">
-              {todayQuery.trim() ? "没搜到这位病人" : mineOnly ? "还没有派给你的项" : "今天还没有病人"}
-            </p>
           ) : (
             <div className="today-list">
               {!equipmentView && !staffView && today.length >= 8 ? (
@@ -455,7 +514,16 @@ export function Today({ snap, live, changedBy, onRefresh, onSnap, onOpen }) {
                   onChange={(event) => setTodayQuery(event.target.value)}
                 />
               ) : null}
-              {filteredToday.map((entry) => {
+              {filteredToday.length === 0 ? (
+                <div className="today-empty">
+                  <p>{todayQuery.trim() ? "没搜到这位病人" : mineOnly ? "还没有派给你的项" : "今天还没有病人"}</p>
+                  {todayQuery.trim() ? (
+                    <button type="button" className="secondary today-clear-search" onClick={() => setTodayQuery("")}>
+                      清除搜索
+                    </button>
+                  ) : null}
+                </div>
+              ) : filteredToday.map((entry) => {
                 // 单人治疗室没有「派给我的」标签：行内完成直接开在名单行上。
                 const inline = mineOnly || !multi
                 const showComplete = inline && entry.mineNextId
@@ -704,6 +772,14 @@ export function Today({ snap, live, changedBy, onRefresh, onSnap, onOpen }) {
           document.body,
         )
         : null}
+      {commandOpen ? (
+        <TodayCommandSheet
+          snap={snap}
+          onClose={() => setCommandOpen(false)}
+          onSnap={onSnap}
+          onDone={finishCommand}
+        />
+      ) : null}
       {settings ? (
         <SettingsSheet
           snap={snap}
