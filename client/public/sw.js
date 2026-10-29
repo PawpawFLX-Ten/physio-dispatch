@@ -53,3 +53,15 @@ self.addEventListener("fetch", (event) => {
       .catch(() => caches.match(request).then((hit) => hit || caches.match("/"))),
   )
 })
+
+// 本机任务提醒：点击通知时优先聚焦已打开的派工页面，没有就新开。
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close()
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
+      const hit = list.find((client) => new URL(client.url).origin === self.location.origin)
+      if (hit) return hit.focus()
+      return self.clients.openWindow("/")
+    }),
+  )
+})

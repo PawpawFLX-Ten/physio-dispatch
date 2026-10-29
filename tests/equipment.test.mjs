@@ -1247,3 +1247,239 @@ test("templates, repeat and restore create tasks without copying a live lock", (
   assert.equal(repeated.entry.items[0].startedAt, null)
   assert.equal(repeated.entry.items[0].startedBy, null)
 })
+
+test("replaceItem swaps shockwave for ultrasound in place with explicit unit and old assignee", () => {
+  const { store } = openStore()
+  const created = patientWithChief(store, "right", "右膝疼痛")
+  const aide = store.state.staff.find((person) => person.name === "小李")
+  const firstView = store.addItem({
+    deviceId: "doc",
+    entryId: created.entry.id,
+    targetId: "quad",
+    side: "right",
+    equipmentTypeId: "shockwave",
+    assigneeId: aide.id,
+  })
+  const oldItem = firstView.entry.items[0]
+  // 模拟从病症档案挂过来的项；原位替换后来源链必须断开。
+  oldItem.sourceItemId = "condition-source-item"
+  store.addItem({
+    deviceId: "doc",
+    entryId: created.entry.id,
+    targetId: "hamstring",
+    side: "right",
+    technique: "massage",
+    direction: "along",
+    dose: { minutes: 8 },
+  })
+  const before = store.entryById(created.entry.id)
+  const originalSecond = structuredClone(before.items[1])
+  const versionBefore = before.version
+
+  const replaced = store.replaceItem({
+    deviceId: "doc",
+    entryId: created.entry.id,
+    itemId: oldItem.id,
+    expectedVersion: versionBefore,
+    equipmentTypeId: "ultrasound",
+    equipmentUnitId: "ultrasound-2",
+  })
+  const item = replaced.entry.items[0]
+  assert.equal(replaced.entry.items.length, 2)
+  assert.equal(item.id === oldItem.id, false)
+  assert.deepEqual(store.entryById(created.entry.id).items[1], originalSecond)
+  assert.equal(item.targetId, "quad")
+  assert.equal(item.side, "right")
+  assert.equal(item.conditionId, oldItem.conditionId)
+  assert.equal(item.sourceItemId, null)
+  assert.equal(item.technique, "equipment")
+  assert.equal(item.equipmentTypeId, "ultrasound")
+  assert.equal(item.equipmentUnitId, "ultrasound-2")
+  assert.equal(item.assigneeId, aide.id)
+  assert.equal(item.assigneeName, "小李")
+  assert.equal(item.done, false)
+  assert.equal(item.completedAt, null)
+  assert.equal(item.completedBy, null)
+  assert.equal(item.startedAt, null)
+  assert.equal(item.startedBy, null)
+  assert.equal(replaced.entry.version, versionBefore + 1)
+  assert.equal(store.entryById(created.entry.id).divergedAcked, false)
+
+  // 省略 equipmentUnitId 时仍复用 prepareNewItem 的自动排机台，且默认保留旧派工。
+  const autoUnit = store.replaceItem({
+    deviceId: "doc",
+    entryId: created.entry.id,
+    itemId: item.id,
+    expectedVersion: replaced.entry.version,
+    equipmentTypeId: "ultrasound",
+  })
+  const autoItem = autoUnit.entry.items[0]
+  assert.equal(autoItem.equipmentTypeId, "ultrasound")
+  assert.equal(autoItem.equipmentUnitId, "ultrasound-1")
+  assert.equal(autoItem.assigneeId, aide.id)
+  assert.equal(autoItem.conditionId, oldItem.conditionId)
+  assert.deepEqual(store.entryById(created.entry.id).items[1], originalSecond)
+})
+
+test("replaceItem can switch to a band exercise template and inherits target/side", () => {
+  const { store } = openStore()
+  const created = patientWithChief(store, "right", "右膝疼痛")
+  const aide = store.state.staff.find((person) => person.name === "小李")
+  const added = store.addItem({
+    deviceId: "doc",
+    entryId: created.entry.id,
+    targetId: "quad",
+    equipmentTypeId: "shockwave",
+    assigneeId: aide.id,
+  })
+  const oldItem = added.entry.items[0]
+  const view = store.replaceItem({
+    deviceId: "doc",
+    entryId: created.entry.id,
+    itemId: oldItem.id,
+    expectedVersion: added.entry.version,
+    exerciseTemplateId: "band-terminal-knee-extension",
+  })
+  const item = view.entry.items[0]
+  assert.equal(item.id === oldItem.id, false)
+  assert.equal(item.targetId, "quad")
+  assert.equal(item.side, "right")
+  assert.equal(item.conditionId, oldItem.conditionId)
+  assert.equal(item.technique, "equipment")
+  assert.equal(item.equipmentTypeId, "elastic-band")
+  assert.equal(item.equipmentUnitId, null)
+  assert.equal(item.exerciseTemplateId, "band-terminal-knee-extension")
+  assert.equal(item.exerciseName, "弹力带终末伸膝")
+  assert.deepEqual(item.parameters, { resistance: "light" })
+  assert.deepEqual(item.linkedTargets, [{ targetId: "quad", side: "right" }])
+  assert.equal(item.assigneeId, aide.id)
+  assert.equal(item.startedAt, null)
+  assert.equal(item.done, false)
+})
+
+test("replaceItem rejects active/done/manual items and illegal combos without partial writes", () => {
+  const { store } = openStore()
+  const created = patientWithChief(store, "right", "右膝疼痛")
+  const added = store.addItem({
+    deviceId: "doc",
+    entryId: created.entry.id,
+    targetId: "quad",
+    side: "right",
+    equipmentTypeId: "shockwave",
+  })
+  const oldItem = added.entry.items[0]
+  const beforeItem = structuredClone(store.entryById(created.entry.id).items[0])
+  const versionBefore = store.entryById(created.entry.id).version
+
+  assert.throws(
+    () =>
+      store.replaceItem({
+        deviceId: "doc",
+        entryId: created.entry.id,
+        itemId: oldItem.id,
+        expectedVersion: versionBefore,
+        equipmentTypeId: "ultrasound",
+        equipmentUnitId: "shockwave-1",
+      }),
+    /机台|设备类型/,
+  )
+  assert.deepEqual(store.entryById(created.entry.id).items[0], beforeItem)
+  assert.equal(store.entryById(created.entry.id).version, versionBefore)
+
+  assert.throws(
+    () =>
+      store.replaceItem({
+        deviceId: "doc",
+        entryId: created.entry.id,
+        itemId: oldItem.id,
+        expectedVersion: versionBefore,
+        exerciseTemplateId: "band-row",
+      }),
+    /模板|部位/,
+  )
+  assert.deepEqual(store.entryById(created.entry.id).items[0], beforeItem)
+  assert.equal(store.entryById(created.entry.id).version, versionBefore)
+
+  assert.throws(
+    () =>
+      store.replaceItem({
+        deviceId: "doc",
+        entryId: created.entry.id,
+        itemId: oldItem.id,
+        expectedVersion: versionBefore - 1,
+        equipmentTypeId: "ultrasound",
+      }),
+    /版本|重新拉取/,
+  )
+  assert.deepEqual(store.entryById(created.entry.id).items[0], beforeItem)
+  assert.equal(store.entryById(created.entry.id).version, versionBefore)
+
+  store.patchItem({
+    deviceId: "doc",
+    entryId: created.entry.id,
+    itemId: oldItem.id,
+    patch: { started: true },
+  })
+  const locked = structuredClone(store.entryById(created.entry.id).items[0])
+  const lockedVersion = store.entryById(created.entry.id).version
+  assert.throws(
+    () =>
+      store.replaceItem({
+        deviceId: "doc",
+        entryId: created.entry.id,
+        itemId: oldItem.id,
+        expectedVersion: lockedVersion,
+        equipmentTypeId: "ultrasound",
+      }),
+    /先结束使用/,
+  )
+  assert.deepEqual(store.entryById(created.entry.id).items[0], locked)
+  assert.equal(store.entryById(created.entry.id).version, lockedVersion)
+
+  store.patchItem({ deviceId: "doc", entryId: created.entry.id, itemId: oldItem.id, patch: { started: false } })
+  store.patchItem({
+    deviceId: "doc",
+    entryId: created.entry.id,
+    itemId: oldItem.id,
+    patch: { done: true },
+  })
+  const doneItem = structuredClone(store.entryById(created.entry.id).items[0])
+  const doneVersion = store.entryById(created.entry.id).version
+  assert.throws(
+    () =>
+      store.replaceItem({
+        deviceId: "doc",
+        entryId: created.entry.id,
+        itemId: oldItem.id,
+        expectedVersion: doneVersion,
+        equipmentTypeId: "ultrasound",
+      }),
+    /已完成/,
+  )
+  assert.deepEqual(store.entryById(created.entry.id).items[0], doneItem)
+  assert.equal(store.entryById(created.entry.id).version, doneVersion)
+
+  store.addItem({
+    deviceId: "doc",
+    entryId: created.entry.id,
+    targetId: "hamstring",
+    technique: "massage",
+    direction: "along",
+    dose: { minutes: 8 },
+  })
+  const manual = store.entryById(created.entry.id).items.at(-1)
+  const manualVersion = store.entryById(created.entry.id).version
+  assert.throws(
+    () =>
+      store.replaceItem({
+        deviceId: "doc",
+        entryId: created.entry.id,
+        itemId: manual.id,
+        expectedVersion: manualVersion,
+        equipmentTypeId: "ultrasound",
+      }),
+    /只有设备项/,
+  )
+  assert.deepEqual(store.entryById(created.entry.id).items.at(-1), manual)
+  assert.equal(store.entryById(created.entry.id).version, manualVersion)
+})

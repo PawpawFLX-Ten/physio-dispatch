@@ -651,6 +651,62 @@ export const entryMethods = {
     return this.entryView(deviceId, entry.id)
   },
 
+  // 原位替换设备/动作：先复用 prepareNewItem 做全量校验，成功后才替换数组同一格。
+  // 当前项必须空闲且未完成；新任务 id、清完成/来源链，conditionId 与队列位置保持不变。
+  replaceItem({ deviceId, entryId, itemId, expectedVersion, ...input }) {
+    const staff = this.requireStaff(deviceId)
+    const entry = this.entryById(entryId)
+    assertExpectedVersion(entry, expectedVersion)
+    const at = entry.items.findIndex((row) => row.id === itemId)
+    if (at < 0) fail(404, "找不到这一项")
+    const current = entry.items[at]
+    if (current.technique !== "equipment") fail(400, "只有设备项可以更换")
+    if (current.startedAt) fail(409, "设备使用中，请先结束使用")
+    if (current.done) fail(409, "已完成的任务不能更换")
+
+    // 可选字段默认沿用旧项；设备字段不默认沿用，让调用方明确选择新设备/模板。
+    const provided = Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined))
+    const payload = {
+      targetId: current.targetId,
+      side: current.side || null,
+      assigneeId: current.assigneeId ?? null,
+      ...provided,
+      technique: "equipment",
+    }
+    const prepared = prepareNewItem({
+      store: this,
+      staff,
+      entry,
+      input: payload,
+      previous: current,
+      fallbackTechnique: "equipment",
+      inheritPrevious: true,
+      options: { unitUsage: equipmentUsageToday(this, current.id) },
+    })
+    const replacement = {
+      id: id(),
+      conditionId: current.conditionId,
+      sourceItemId: null,
+      ...prepared,
+      done: false,
+      completedBy: null,
+      completedAt: null,
+      startedAt: null,
+      startedBy: null,
+    }
+    entry.items[at] = replacement
+    touchDiverged(entry)
+    bumpEntryVersion(entry)
+    this.save()
+    this.audit(deviceId, "更换设备/动作", {
+      项: targetTitle(replacement.targetId, replacement.side || null),
+      设备: replacement.equipmentTypeId || "",
+      动作: replacement.exerciseTemplateId || "",
+      派给: this.state.staff.find((person) => person.id === replacement.assigneeId)?.name || "",
+    })
+    return this.entryView(deviceId, entry.id)
+  },
+
   patchItem({ deviceId, entryId, itemId, patch, expectedVersion }) {
     const staff = this.requireStaff(deviceId)
     const entry = this.entryById(entryId)

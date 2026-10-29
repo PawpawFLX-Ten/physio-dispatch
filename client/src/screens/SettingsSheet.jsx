@@ -16,6 +16,12 @@ export function SettingsSheet({ snap, pending, error, run, onClose, onRefresh })
   const [pairingSite, setPairingSite] = useState(CHIEF_SITES[0])
   const [pairingQuery, setPairingQuery] = useState("")
   const importRef = useRef(null)
+  const [notifyPermission, setNotifyPermission] = useState(() => {
+    if (typeof window === "undefined" || !("Notification" in window)) return "unsupported"
+    return window.Notification.permission
+  })
+  const notificationsAvailable =
+    typeof window !== "undefined" && "Notification" in window && Boolean(window.isSecureContext)
   const archivedPatients = (snap.patients || []).filter((patient) => patient.archived)
   const templates = snap.templates || []
   const equipmentTypes = snap.equipmentTypes || []
@@ -93,6 +99,35 @@ export function SettingsSheet({ snap, pending, error, run, onClose, onRefresh })
                     <p className="muted">同一 Wi‑Fi 的手机用这个地址打开（以终端打印的局域网 IP 为准）。</p>
                   </>
                 ) : null}
+                <h3>任务提醒</h3>
+                {!notificationsAvailable ? (
+                  <p className="muted">
+                    当前用 HTTP 打开，浏览器不开放本地通知。用 HTTPS 或“添加到主屏”后，可显示任务角标并在后台收到本机提醒；手机省电策略仍可能延迟。
+                  </p>
+                ) : notifyPermission === "granted" ? (
+                  <p className="muted">
+                    已开启。新任务会增加桌面角标；页面在后台但未被系统挂起时会弹本机通知。锁屏推送仍取决于手机系统。
+                  </p>
+                ) : notifyPermission === "denied" ? (
+                  <p className="error">浏览器已拒绝通知；可到网站设置里重新允许。</p>
+                ) : (
+                  <>
+                    <p className="muted">开启后，新任务会增加角标；页面在后台时会尽量弹本机提醒。</p>
+                    <button
+                      type="button"
+                      className="secondary"
+                      disabled={pending}
+                      onClick={() => {
+                        run(async () => {
+                          const result = await window.Notification.requestPermission()
+                          setNotifyPermission(result)
+                        })
+                      }}
+                    >
+                      开启任务提醒
+                    </button>
+                  </>
+                )}
                 <h3>备份</h3>
                 <div className="today-template-buttons">
                   <button

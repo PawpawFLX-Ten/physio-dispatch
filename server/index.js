@@ -106,6 +106,10 @@ app.get("/api/entries/:id", asyncRoute((req) => store.entryView(req.query.device
 app.post("/api/entries/:id/conditions", asyncRoute((req) => store.addCondition({ ...req.body, entryId: req.params.id })))
 app.post("/api/entries/:id/chief", asyncRoute((req) => store.setChief({ ...req.body, entryId: req.params.id })))
 app.post("/api/entries/:id/items", asyncRoute((req) => store.addItem({ ...req.body, entryId: req.params.id })))
+app.post(
+  "/api/entries/:id/items/:itemId/replace",
+  asyncRoute((req) => store.replaceItem({ ...req.body, entryId: req.params.id, itemId: req.params.itemId })),
+)
 app.post("/api/entries/:id/items/restore", asyncRoute((req) => store.restoreItem({ ...req.body, entryId: req.params.id })))
 app.patch("/api/entries/:id/items/:itemId", asyncRoute((req) => store.patchItem({ ...req.body, entryId: req.params.id, itemId: req.params.itemId })))
 app.delete("/api/entries/:id/items/:itemId", asyncRoute((req) => store.removeItem({ deviceId: req.body?.deviceId || req.query?.deviceId, entryId: req.params.id, itemId: req.params.itemId })))

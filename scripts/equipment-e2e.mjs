@@ -281,7 +281,25 @@ try {
   }
   console.log("5 设备、机台、参数、关联目标、派工、侧别落库：通过")
 
-  await clickButton(page, "收起")
+  // 原位更换：把当前超声任务换成冲击波，位置/派工不变，不能让用户删了重加。
+  await page.getByRole("button", { name: "更换设备或动作", exact: true }).click()
+  await waitText(page, ["更换设备或动作", "原位替换"])
+  await page.locator(".patient-equipment-type").filter({ hasText: "冲击波" }).click()
+  await waitGone(page, "更换设备或动作")
+  await waitClinic(
+    (data) => Object.values(data.days)
+      .flatMap((day) => day.entries)
+      .flatMap((entry) => entry.items)
+      .some((item) => item.targetId === "infraspinatus" && item.equipmentTypeId === "shockwave" && !item.startedAt),
+    "超声原位换冲击波",
+  )
+  const replaced = JSON.parse(fs.readFileSync(path.join(dataDir, "clinic.json"), "utf8"))
+  const replacedEntry = Object.values(replaced.days).flatMap((day) => day.entries).find((row) => row.id === patient.entry.id)
+  const originalTargets = entry.items.map((item) => item.targetId)
+  const replacedTargets = replacedEntry.items.map((item) => item.targetId)
+  if (JSON.stringify(originalTargets) !== JSON.stringify(replacedTargets)) throw new Error("原位替换改变了任务顺序")
+  console.log("6 设备类型原位替换、顺序与派工保持：通过")
+
   await clickButton(page, "返回")
   const afterBack = await bodyText(page)
   if (afterBack.includes("今天的改动要记回病症吗")) await clickButton(page, "留在今天")
@@ -289,7 +307,7 @@ try {
   await clickButton(page, "按设备")
   await waitText(page, ["冲击波", "超声 1 号机", "超声 2 号机", "弹力带", "空闲"])
   await waitText(page, ["当前：", "设备测试阿姨"])
-  console.log("6 今日单按设备视图展示软占用/空闲状态：通过")
+  console.log("7 今日单按设备视图展示软占用/空闲状态：通过")
 
   // 今日单全局吩咐：选今天已有病人，一句话再派 1 项。
   const beforeCommand = JSON.parse(fs.readFileSync(path.join(dataDir, "clinic.json"), "utf8"))
@@ -315,7 +333,7 @@ try {
   if (!commanded.assigneeId || commanded.targetId !== "supraspinatus" || commanded.technique !== "massage") {
     throw new Error(`全局吩咐落库不对：${JSON.stringify(commanded)}`)
   }
-  console.log("7 今日单全局吩咐入口：通过")
+  console.log("8 今日单全局吩咐入口：通过")
 
   // 为真实设备锁补两项同机台超声任务，均派给当前医生。
   const staffRows = afterCommand.staff || []
@@ -339,6 +357,7 @@ try {
   await waitText(page, ["今日单", "我的任务"])
   await page.locator(".today-tab").filter({ hasText: "我的任务" }).click()
   await waitText(page, ["我的任务", "开始设备", "左腓肠肌", "左比目鱼肌"])
+  await page.waitForFunction(() => /^\(\d+\) 治疗室派工$/.test(document.title))
   const firstDeviceRow = page.locator(".today-my-wrap").filter({ hasText: "左腓肠肌" })
   const secondDeviceRow = page.locator(".today-my-wrap").filter({ hasText: "左比目鱼肌" })
   await firstDeviceRow.getByRole("button", { name: "开始设备", exact: true }).click()
@@ -352,7 +371,7 @@ try {
   await waitText(page, ["使用中"])
   await secondDeviceRow.getByRole("button", { name: "完成", exact: true }).click()
   await secondDeviceRow.waitFor({ state: "detached" })
-  console.log("8 我的任务队列与设备真实开始/冲突/结束/完成释放：通过")
+  console.log("9 我的任务队列与设备真实开始/冲突/结束/完成释放：通过")
 
   // 将医生的未完成项跨病人整批移交给小李；设备使用中的锁必须释放。
   const shockwaveRow = page.locator(".today-my-wrap").filter({ hasText: "冲击波" }).first()
@@ -381,7 +400,53 @@ try {
   if (afterEntryForHandoff.items.some((item) => !item.done && item.assigneeId === aide.id && item.startedAt)) {
     throw new Error("移交后仍残留设备锁")
   }
-  console.log("9 跨病人一键移交并释放设备锁：通过")
+  await page.waitForFunction(() => document.title === "治疗室派工")
+  console.log("10 跨病人一键移交并释放设备锁：通过")
+
+  // 全局吩咐：不在今天的档案也应可先加入今天再吩咐。
+  const newPatient = await post("/api/patients", { name: "未加入阿姨", conditionName: "左肩痛" })
+  await post(`/api/entries/${newPatient.entry.id}/drop`, {})
+  await page.reload({ waitUntil: "load" })
+  await waitText(page, ["今日单", "吩咐"])
+  await clickButton(page, "吩咐")
+  await waitText(page, ["未加入今天", "未加入阿姨"])
+  await page.locator(".today-command-patient").filter({ hasText: "未加入阿姨" }).click()
+  await waitText(page, ["已加入今日单，继续吩咐"])
+  await page.waitForSelector(".today-command-input", { state: "visible" })
+  await page.evaluate(() => {
+    const input = document.querySelector(".today-command-input")
+    const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set
+    set.call(input, "左肩冈上肌按摩5分钟派给小李")
+    input.dispatchEvent(new Event("input", { bubbles: true }))
+  })
+  await waitText(page, ["派给 小李", "冈上肌", "按摩"])
+  await clickButton(page, "吩咐 1 项")
+  await waitText(page, ["已加入今日并吩咐 1 项"])
+  const newPatientAfter = JSON.parse(fs.readFileSync(path.join(dataDir, "clinic.json"), "utf8"))
+  const newEntryAfter = Object.values(newPatientAfter.days)
+    .flatMap((day) => day.entries)
+    .find((row) => row.patientId === newPatient.entry.patientId)
+  if (!newEntryAfter || newEntryAfter.chiefSiteId !== "shoulder" || newEntryAfter.chiefSide !== "left") {
+    throw new Error("新加入病人的主诉/侧别不对")
+  }
+  const newItem = newEntryAfter.items.find((item) => item.targetId === "supraspinatus" && item.technique === "massage")
+  if (!newItem || !newItem.assigneeId) throw new Error("新加入病人的吩咐没有落库")
+  console.log("11 未加入今天的病人一键加入并吩咐：通过")
+
+  await clickButton(page, "设置")
+  await waitText(page, ["任务提醒"])
+  const notificationText = await bodyText(page)
+  if (
+    !notificationText.includes("开启任务提醒") &&
+    !notificationText.includes("已开启") &&
+    !notificationText.includes("浏览器已拒绝通知") &&
+    !notificationText.includes("HTTP 打开")
+  ) {
+    throw new Error("任务提醒区没有可识别的状态")
+  }
+  await page.keyboard.press("Escape")
+  await waitGone(page, "任务提醒")
+  console.log("12 PWA 角标与本机通知入口：通过")
 
   if (pageErrors.length) throw new Error(`页面异常：${pageErrors.join(" | ")}`)
   console.log("EQUIPMENT_E2E_OK")

@@ -101,6 +101,11 @@ export const api = {
   setChief: (id, targetId, side) => request(`/api/entries/${id}/chief`, { method: "POST", body: { targetId, side } }),
   addItem: (id, targetId, side, extra = {}) =>
     request(`/api/entries/${id}/items`, { method: "POST", body: { targetId, side, ...extra } }),
+  replaceItem: (id, itemId, selection, expectedVersion) =>
+    request(`/api/entries/${id}/items/${itemId}/replace`, {
+      method: "POST",
+      body: { ...selection, ...(expectedVersion != null ? { expectedVersion } : {}) },
+    }),
   patchItem: (id, itemId, patch, expectedVersion) =>
     request(`/api/entries/${id}/items/${itemId}`, {
       method: "PATCH",

@@ -16,11 +16,15 @@ export function EquipmentPicker({
   exerciseTemplates = [],
   pending,
   notice,
+  mode = "add",
+  title,
   onAdd,
   onClose,
 }) {
   const target = targetById(targetId)
-  const title = targetTitle(targetId, side)
+  const targetLabel = targetTitle(targetId, side)
+  const sheetTitle = title || (mode === "replace" ? "更换设备或动作" : "选择设备或动作")
+  const replacing = mode === "replace"
   const types = equipmentTypes.filter(
     (type) => type?.id && compatibleWith(type, targetId) && (!type.technique || type.technique === "equipment"),
   )
@@ -46,16 +50,19 @@ export function EquipmentPicker({
   }
 
   return (
-    <Sheet title="选择设备或动作" onClose={onClose}>
+    <Sheet title={sheetTitle} onClose={onClose}>
       <Notice notice={notice} />
       <div className="patient-equipment-current">
         <span className="patient-equipment-eyebrow">当前部位</span>
-        <strong>{title}</strong>
+        <strong>{targetLabel}</strong>
         {target?.name && side ? <span className="patient-equipment-side">{side === "left" ? "左侧" : "右侧"}</span> : null}
       </div>
+      {replacing ? (
+        <p className="patient-equipment-replace-note">选中后原位替换，任务顺序和派工保持不变。</p>
+      ) : null}
       {pending ? (
         <p className="patient-equipment-pending" role="status">
-          正在入库…
+          {replacing ? "正在替换…" : "正在入库…"}
         </p>
       ) : null}
       {missingSide ? (
@@ -65,8 +72,8 @@ export function EquipmentPicker({
       ) : null}
       {noChoices ? (
         <div className="patient-equipment-empty" role="status">
-          <strong>这个部位没有兼容的设备或动作模板</strong>
-          <span>可以切回手动模式，继续用按摩、松解或牵伸。</span>
+          <strong>{replacing ? "这个部位没有可替换的设备或动作模板" : "这个部位没有兼容的设备或动作模板"}</strong>
+          <span>{replacing ? "关闭后保留原设备任务。" : "可以切回手动模式，继续用按摩、松解或牵伸。"}</span>
         </div>
       ) : null}
       {types.length ? (

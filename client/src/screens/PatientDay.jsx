@@ -80,6 +80,7 @@ export function PatientDay({ entryId, initial, pulse, live = true, onBack }) {
   // 手动模式保留原来的点一下直接加项；设备模式先弹选择器，确定设备/模板后才入库。
   const [addMode, setAddMode] = useState("manual")
   const [equipmentTarget, setEquipmentTarget] = useState(null)
+  const [replacingItemId, setReplacingItemId] = useState(null)
   // 人体收起是本机偏好：开完单只看清单的人不用每次都等模型。
   const [modelTucked, setModelTucked] = useState(() => {
     try {
@@ -113,6 +114,7 @@ export function PatientDay({ entryId, initial, pulse, live = true, onBack }) {
       activeItemId ||
       bodyGroup ||
       equipmentTarget ||
+      replacingItemId ||
       copyOpen ||
       saveTmplOpen ||
       applyTmplOpen ||
@@ -166,6 +168,7 @@ export function PatientDay({ entryId, initial, pulse, live = true, onBack }) {
     setActiveItemId(null)
     setBodyGroup(null)
     setEquipmentTarget(null)
+    setReplacingItemId(null)
     setAddMode("manual")
     setCopyOpen(false)
     setSaveTmplOpen(false)
@@ -336,6 +339,7 @@ export function PatientDay({ entryId, initial, pulse, live = true, onBack }) {
           setActiveItemId(null)
           setBodyGroup(null)
           setEquipmentTarget(null)
+          setReplacingItemId(null)
           setMoreOpen(false)
           setSaveTmplOpen(false)
           setApplyTmplOpen(false)
@@ -471,6 +475,7 @@ export function PatientDay({ entryId, initial, pulse, live = true, onBack }) {
     setActiveItemId(null)
     setBodyGroup(null)
     setEquipmentTarget(null)
+    setReplacingItemId(null)
     setCopyOpen(false)
     setSaveTmplOpen(false)
     setApplyTmplOpen(false)
@@ -621,6 +626,14 @@ export function PatientDay({ entryId, initial, pulse, live = true, onBack }) {
     )
   }
 
+  // 设备编辑器里的“更换设备或动作”：保留活动项卡，在上层打开替换模式 Picker。
+  function requestEquipmentReplace() {
+    if (!activeItem || !activeEquipment || pending) return
+    setNotice(blankNotice)
+    setReplacingItemId(activeItem.id)
+    setEquipmentTarget({ targetId: activeItem.targetId, side: activeItem.side || null })
+  }
+
   // 设备/模板选择完成后只调用一次 addItem；服务端负责默认参数、自动机台和模板关联目标。
   function addEquipmentChoice(extra, label) {
     if (!equipmentTarget || pending) return
@@ -629,6 +642,25 @@ export function PatientDay({ entryId, initial, pulse, live = true, onBack }) {
       fail: "未能保存",
     }).then((ok) => {
       if (ok) setEquipmentTarget(null)
+    })
+  }
+
+  // 替换模式：一次 POST replace，成功后同时关闭 Picker 和活动项操作卡；失败留在原地显示错误。
+  function replaceEquipmentChoice(extra, label) {
+    if (!equipmentTarget || !replacingItemId || pending) return
+    const selection = {
+      targetId: equipmentTarget.targetId,
+      side: equipmentTarget.side,
+      ...extra,
+    }
+    return mutate(
+      () => withVersion((v) => api.replaceItem(entryId, replacingItemId, selection, v)),
+      { success: `已更换为 ${label || "新设备"}` },
+    ).then((ok) => {
+      if (!ok) return
+      setEquipmentTarget(null)
+      setReplacingItemId(null)
+      setActiveItemId(null)
     })
   }
 
@@ -1346,6 +1378,7 @@ export function PatientDay({ entryId, initial, pulse, live = true, onBack }) {
               onSaveParameters={saveActiveEquipmentParameters}
               onSelectUnit={selectActiveEquipmentUnit}
               onSetStarted={setActiveEquipmentStarted}
+              onRequestReplace={requestEquipmentReplace}
             />
           ) : null}
           <p className="patient-label">手法</p>
@@ -1618,8 +1651,13 @@ export function PatientDay({ entryId, initial, pulse, live = true, onBack }) {
           exerciseTemplates={exerciseTemplates}
           pending={pending}
           notice={notice}
-          onAdd={addEquipmentChoice}
-          onClose={() => setEquipmentTarget(null)}
+          mode={replacingItemId ? "replace" : "add"}
+          title={replacingItemId ? "更换设备或动作" : "选择设备或动作"}
+          onAdd={replacingItemId ? replaceEquipmentChoice : addEquipmentChoice}
+          onClose={() => {
+            setEquipmentTarget(null)
+            setReplacingItemId(null)
+          }}
         />
       ) : null}
 

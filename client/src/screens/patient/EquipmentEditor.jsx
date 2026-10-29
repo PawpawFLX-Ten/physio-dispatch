@@ -24,6 +24,7 @@ export function EquipmentEditor({
   onSaveParameters,
   onSelectUnit,
   onSetStarted,
+  onRequestReplace,
 }) {
   const fields = equipmentParameterFields(type)
   // 父层以参数快照作 key；保存成功/外部改动会重挂并刷新草稿，改派工/机台不会丢本地编辑。
@@ -217,7 +218,17 @@ export function EquipmentEditor({
         )}
       </div>
 
-      <p className="patient-equipment-editor-hint">换设备/动作请删除后重加</p>
+      <button
+        type="button"
+        className="secondary patient-equipment-replace-btn"
+        disabled={pending || item.done || Boolean(item.startedAt)}
+        onClick={() => onRequestReplace?.()}
+      >
+        更换设备或动作
+      </button>
+      <p className="patient-equipment-editor-hint">
+        {item.done ? "已完成的任务不能更换。" : item.startedAt ? "结束使用后才能更换。" : "原位替换，任务顺序和派工保持不变。"}
+      </p>
     </section>
   )
 }

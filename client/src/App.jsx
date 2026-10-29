@@ -128,6 +128,59 @@ export default function App() {
     refresh().catch(() => {})
   }, [pulse])
 
+  // 今日任务角标 + 本地通知：PWA 装在主屏时能显示未完成数；页面在后台但没被系统杀掉时，
+  // 新任务仍可发出本机通知。真正的锁屏推送受局域网 HTTP/系统省电限制，不做虚假承诺。
+  const myOpenCount =
+    snap?.stage === "ready" && Array.isArray(snap.myTasks)
+      ? snap.myTasks.filter((task) => !task.done).length
+      : 0
+  const previousOpenCount = useRef(null)
+  useEffect(() => {
+    document.title = myOpenCount ? `(${myOpenCount}) 治疗室派工` : "治疗室派工"
+    try {
+      if (myOpenCount && typeof navigator.setAppBadge === "function") navigator.setAppBadge(myOpenCount).catch(() => {})
+      else if (!myOpenCount && typeof navigator.clearAppBadge === "function") navigator.clearAppBadge().catch(() => {})
+    } catch {
+      /* 不支持 Badging API 的浏览器忽略 */
+    }
+    const previous = previousOpenCount.current
+    previousOpenCount.current = myOpenCount
+    if (
+      previous != null &&
+      myOpenCount > previous &&
+      document.visibilityState === "hidden" &&
+      typeof window.Notification === "function" &&
+      window.Notification.permission === "granted"
+    ) {
+      const body = `你有 ${myOpenCount} 项未完成`
+      const options = {
+        body,
+        tag: "clinic-tasks",
+        icon: "/icons/icon-192.png",
+        badge: "/icons/icon-192.png",
+      }
+      // Service Worker 通知在已安装 PWA/部分手机上比页面 Notification 更稳；
+      // 注册还没就绪时退回页面通知，两者失败都不阻塞治疗流程。
+      if (navigator.serviceWorker?.controller) {
+        navigator.serviceWorker.ready
+          .then((registration) => registration.showNotification("治疗室有新任务", options))
+          .catch(() => {
+            try {
+              new window.Notification("治疗室有新任务", options)
+            } catch {
+              /* 系统不支持就保持页面内提示 */
+            }
+          })
+      } else {
+        try {
+          new window.Notification("治疗室有新任务", options)
+        } catch {
+          /* iOS/微信可能只允许 Service Worker 通知：不阻塞主流程 */
+        }
+      }
+    }
+  }, [myOpenCount])
+
   // 微信里切走或手机锁屏时页面会被挂起，SSE 可能悄悄断掉：
   // 回到前台就当收到一次推送，别等心跳慢慢补。
   useEffect(() => {

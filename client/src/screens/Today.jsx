@@ -343,8 +343,12 @@ export function Today({ snap, live, changedBy, onRefresh, onSnap, onOpen }) {
   // 微信内置浏览器调不起系统打印：别放一个点了没反应的按钮。
   const canPrint = !/MicroMessenger/i.test(navigator.userAgent)
 
-  function finishCommand(count) {
+  function finishCommand(count, meta = {}) {
     setCommandOpen(false)
+    if (meta.addedToday) {
+      setCommandNotice(count ? `已加入今日并吩咐 ${count} 项` : "已加入今日单")
+      return
+    }
     setCommandNotice(count ? `已吩咐 ${count} 项` : "已吩咐 0 项 · 要治的位置已更新")
   }
 

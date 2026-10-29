@@ -932,6 +932,17 @@
   margin: 8px 0 0;
 }
 
+.today-command-added-notice {
+  margin: 10px 0 2px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
 .today-command-selected {
   display: flex;
   align-items: center;
@@ -1018,6 +1029,16 @@
   font-size: 14px;
 }
 
+.today-command-empty p {
+  margin: 0;
+}
+
+.today-command-empty-hint {
+  margin-top: 4px !important;
+  color: var(--muted-2);
+  font-size: 13px;
+}
+
 .today-command-unknown {
   margin: 6px 0 0;
   color: var(--danger-strong);
@@ -1039,18 +1060,55 @@
 
 .today-command-patient {
   width: 100%;
-  min-height: 56px;
-  display: flex;
+  min-height: 60px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
   gap: 12px;
   text-align: left;
 }
 
-.today-command-patient span:last-child {
+.today-command-patient:active {
+  background: var(--press);
+}
+
+.today-command-patient-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.today-command-patient-name {
+  font-size: 18px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.today-command-patient-conditions {
   color: var(--muted);
   font-size: 14px;
-  text-align: right;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.today-command-patient-state {
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.today-command-patient-state.is-today {
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+
+.today-command-patient-state.is-new {
+  background: var(--card);
+  color: var(--muted-2);
+  box-shadow: inset 0 0 0 1px var(--line);
 }
 
 /* 设置页设备台账：默认折叠，只占一行，展开后按设备类型看机台。 */

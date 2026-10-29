@@ -10,7 +10,7 @@ function readableError(err) {
   return err instanceof Error ? err.message : "未能吩咐"
 }
 
-// 今日单的全局吩咐：先选今天已在单上的病人，再说一句；不复制病人页的完整加项面板。
+// 今日单的全局吩咐：今天已有或尚未加入的病人可选；未加入的先加入，再说一句。
 export function TodayCommandSheet({ snap, onClose, onSnap, onDone }) {
   const [query, setQuery] = useState("")
   const [entryView, setEntryView] = useState(null)
@@ -18,20 +18,68 @@ export function TodayCommandSheet({ snap, onClose, onSnap, onDone }) {
   const [loading, setLoading] = useState(false)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState("")
+  const [addedNotice, setAddedNotice] = useState("")
+  const [addedToday, setAddedToday] = useState(false)
   const todayEntries = useMemo(() => snap.today || [], [snap.today])
+  const patients = useMemo(() => snap.patients || [], [snap.patients])
+  const patientsById = useMemo(() => new Map(patients.map((patient) => [patient.id, patient])), [patients])
+  const todayByPatient = useMemo(() => {
+    const map = new Map()
+    for (const entry of todayEntries) {
+      if (entry.patientId && !map.has(entry.patientId)) map.set(entry.patientId, entry)
+    }
+    return map
+  }, [todayEntries])
+  const commandPatients = useMemo(() => {
+    const rows = []
+    const seeToday = new Set(todayByPatient.keys())
+    const conditionsOf = (patient) => (patient?.conditions || []).map((condition) => condition.name).filter(Boolean)
+    // 今天在单上的病人先列，即使档案列表里暂时找不到也要可点。
+    for (const [patientId, entry] of todayByPatient) {
+      const patient = patientsById.get(patientId)
+      const conditionNames = [...new Set([...conditionsOf(patient), ...(entry.conditionNames || [])])]
+      rows.push({
+        patientId,
+        entryId: entry.id,
+        name: entry.patientName || patient?.name || "病人",
+        conditions: conditionNames,
+        lastDay: patient?.lastDay || null,
+        inToday: true,
+      })
+    }
+    // 其余全部未归档档案按最近来过、再按姓名排；今天的人已经在上面优先展示。
+    const others = patients
+      .filter((patient) => !patient.archived && !seeToday.has(patient.id))
+      .map((patient) => ({
+        patientId: patient.id,
+        entryId: null,
+        name: patient.name,
+        conditions: conditionsOf(patient),
+        lastDay: patient.lastDay || null,
+        inToday: false,
+      }))
+      .sort((left, right) => {
+        if (Boolean(left.lastDay) !== Boolean(right.lastDay)) return left.lastDay ? -1 : 1
+        if (left.lastDay && right.lastDay && left.lastDay !== right.lastDay) {
+          return left.lastDay < right.lastDay ? 1 : -1
+        }
+        return left.name.localeCompare(right.name, "zh-Hans-CN")
+      })
+    return [...rows, ...others]
+  }, [todayByPatient, patientsById, patients])
   const entry = entryView?.entry || null
   const staff = entryView?.staff || snap.staff || []
   const equipmentTypes = entryView?.equipmentTypes || snap.equipmentTypes || []
   const exerciseTemplates = entryView?.exerciseTemplates || snap.exerciseTemplates || []
-  const filteredEntries = useMemo(() => {
+  const filteredPatients = useMemo(() => {
     const q = query.trim()
-    if (!q) return todayEntries
-    return todayEntries.filter(
+    if (!q) return commandPatients
+    return commandPatients.filter(
       (row) =>
-        matchesInitials(q, row.patientName) ||
-        (row.conditionNames || []).some((conditionName) => matchesInitials(q, conditionName)),
+        matchesInitials(q, row.name) ||
+        row.conditions.some((conditionName) => matchesInitials(q, conditionName)),
     )
-  }, [todayEntries, query])
+  }, [commandPatients, query])
   const parsed = normalizeQuickOrderSides(
     parseQuickOrder(text, { staff, equipment: equipmentTypes }),
     { chiefSide: entry?.chiefSide, chiefSiteId: entry?.chiefSiteId },
@@ -40,16 +88,27 @@ export function TodayCommandSheet({ snap, onClose, onSnap, onDone }) {
   const previewAssignee =
     parsed.assigneeName || staff.find((person) => person.id === parsed.assigneeId)?.name || ""
 
-  async function pickEntry(row) {
+  async function pickPatient(row) {
     if (loading) return
     setLoading(true)
     setError("")
+    setAddedNotice("")
+    setAddedToday(false)
     setEntryView(null)
     setText("")
     try {
-      const next = await api.entry(row.id)
-      if (!next?.entry) throw new Error("没有读到这张单")
-      setEntryView(next)
+      if (row.inToday) {
+        const next = await api.entry(row.entryId)
+        if (!next?.entry) throw new Error("没有读到这张单")
+        setEntryView(next)
+        return
+      }
+      const result = await api.addExisting(row.patientId)
+      if (!result?.entry) throw new Error("病人已加入，但没有读到今日单")
+      setEntryView(result)
+      setAddedToday(true)
+      setAddedNotice("已加入今日单，继续吩咐（关闭不会撤销加入）")
+      onSnap(result)
     } catch (err) {
       setError(readableError(err))
     } finally {
@@ -77,7 +136,7 @@ export function TodayCommandSheet({ snap, onClose, onSnap, onDone }) {
         assigneeId: parsed.assigneeId || null,
       })
       onSnap(result)
-      onDone(parsed.items.length)
+      onDone(parsed.items.length, { addedToday })
     } catch (err) {
       setError(readableError(err))
     } finally {
@@ -98,11 +157,12 @@ export function TodayCommandSheet({ snap, onClose, onSnap, onDone }) {
         <div className="today-command-heading">
           <div>
             <h2 id="today-command-title">吩咐</h2>
-            <p className="today-command-hint">选今天已在单上的病人，再说一句。</p>
+            <p className="today-command-hint">搜病人（今天未加入的会先加入今天）；也可以选今天已在单上的病人，再说一句。</p>
           </div>
           <button type="button" className="today-gear" onClick={onClose}>收起</button>
         </div>
         {error ? <p className="error today-command-error" role="alert">{error}</p> : null}
+        {addedNotice ? <p className="today-command-added-notice" role="status">{addedNotice}</p> : null}
         {entry ? (
           <>
             <div className="today-command-selected">
@@ -117,6 +177,8 @@ export function TodayCommandSheet({ snap, onClose, onSnap, onDone }) {
                   setEntryView(null)
                   setText("")
                   setError("")
+                  setAddedNotice("")
+                  setAddedToday(false)
                 }}
               >
                 换病人
@@ -185,26 +247,34 @@ export function TodayCommandSheet({ snap, onClose, onSnap, onDone }) {
               className="today-search today-command-search"
               type="search"
               value={query}
-              placeholder="搜今天单上的病人"
-              aria-label="搜今天单上的病人"
+              placeholder="搜病人（今天未加入的会先加入今天）"
+              aria-label="搜病人（今天未加入的会先加入今天）"
               autoFocus
               onChange={(event) => setQuery(event.target.value)}
             />
             <div className="today-command-patients">
-              {filteredEntries.length ? filteredEntries.map((row) => (
+              {filteredPatients.length ? filteredPatients.map((row) => (
                 <button
-                  key={row.id}
+                  key={row.patientId}
                   type="button"
                   className="row-btn today-command-patient"
-                  onClick={() => pickEntry(row)}
+                  onClick={() => pickPatient(row)}
                 >
-                  <span>{row.patientName}</span>
-                  <span>{row.conditionNames?.join("、") || "今日单"}</span>
+                  <span className="today-command-patient-main">
+                    <span className="today-command-patient-name">{row.name}</span>
+                    <span className="today-command-patient-conditions">
+                      {row.conditions.join("、") || "暂无病症"}
+                    </span>
+                  </span>
+                  <span className={row.inToday ? "today-command-patient-state is-today" : "today-command-patient-state is-new"}>
+                    {row.inToday ? "已在今天" : "未加入今天"}
+                  </span>
                 </button>
               )) : (
-                <p className="today-command-empty">
-                  {todayEntries.length ? "没搜到这位病人" : "今天还没有病人，先回今日单加入病人。"}
-                </p>
+                <div className="today-command-empty">
+                  <p>{commandPatients.length ? "没搜到这位病人。" : "还没有可吩咐的病人。"}</p>
+                  <p className="today-command-empty-hint">搜病人（今天未加入的会先加入今天）</p>
+                </div>
               )}
             </div>
           </>

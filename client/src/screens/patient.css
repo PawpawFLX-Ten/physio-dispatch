@@ -1111,3 +1111,23 @@
   outline: 1px solid var(--accent);
   outline-offset: -1px;
 }
+
+/* 设备/动作原位替换：按钮沿用编辑器宽度，提示只说明不会挪动任务。 */
+.patient-day .patient-equipment-replace-btn {
+  min-height: 48px;
+  margin-top: 12px;
+}
+
+.patient-equipment-replace-btn + .patient-equipment-editor-hint {
+  margin-top: 6px;
+}
+
+.patient-equipment-replace-note {
+  margin: 0 0 12px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-size: 14px;
+  line-height: 1.45;
+}
