@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react"
 import { api, getDeviceId } from "./api.js"
 import { parseChangeEvent } from "@shared/events.js"
+import { openLiveConnection } from "./live-connection.js"
 import { Gate } from "./screens/Gate.jsx"
 import { Today } from "./screens/Today.jsx"
 
@@ -86,17 +87,14 @@ export default function App() {
   }, [snap?.stage, snap?.staff?.length])
 
   // 别的手机一改，服务器推一条过来：停在今日单就刷新列表，开着病人页由病人页自己拉。
+  const connected = Boolean(snap)
+  const cloud = snap?.hosting === "cloudflare"
   useEffect(() => {
-    let source
-    try {
-      source = new EventSource("/api/events")
-    } catch {
-      return undefined
-    }
+    if (!connected) return undefined
     let debounce
-    source.onmessage = (event) => {
+    const close = openLiveConnection({ cloud, onMessage: (raw) => {
       // 自己改的数据服务器会带上 origin，应用返回值时已经拿到了最新状态，不用再拉一遍。
-      const payload = parseChangeEvent(event.data)
+      const payload = parseChangeEvent(raw)
       if (payload?.origin && payload.origin === getDeviceId()) return
       if (payload?.by) {
         setChangedBy(payload.by)
@@ -105,22 +103,16 @@ export default function App() {
       }
       clearTimeout(debounce)
       debounce = setTimeout(() => setPulse((n) => n + 1), 400)
-    }
-    source.onopen = () => {
-      setLive(true)
+    }, onState: setLive, onOpen: () => {
       // 重连成功当收到一次推送：断线期间别人的改动补上。
       setPulse((n) => n + 1)
-    }
-    source.onerror = () => {
-      // EventSource 自己会按 retry 重试：出错先亮提示，重连成功由 onopen 收掉。
-      setLive(false)
-    }
+    } })
     return () => {
       clearTimeout(debounce)
       clearTimeout(changedByTimer.current)
-      source.close()
+      close?.()
     }
-  }, [])
+  }, [connected, cloud])
 
   useEffect(() => {
     if (!pulse) return

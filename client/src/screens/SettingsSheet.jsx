@@ -5,6 +5,7 @@ import { TARGETS, allowsWork, targetById } from "@shared/catalog.js"
 import { CHIEF_SITES, DEFAULT_PAIRINGS } from "@shared/pairings.js"
 import { matchesInitials } from "../pinyin.js"
 import { PairingChips } from "../PairingChips.jsx"
+import { CloudBackups } from "./CloudBackups.jsx"
 import "./today.css"
 
 // 今日单的设置弹层：备份导出导入、我是谁、常见搭配编辑器、归档病人、模板管理。
@@ -60,7 +61,7 @@ export function SettingsSheet({ snap, pending, error, run, onClose, onRefresh })
     if (!file) return
     if (
       !window.confirm(
-        "导入会替换本机治疗室的全部数据（病人、今日单、模板）。确定继续？",
+        "导入会替换这间治疗室的全部数据（病人、今日单、模板），影响所有手机。确定继续？",
       )
     ) {
       return
@@ -94,9 +95,9 @@ export function SettingsSheet({ snap, pending, error, run, onClose, onRefresh })
                 <p className="error sheet-error">{error}</p>
                 {clinicUrl ? (
                   <>
-                    <h3>本机地址</h3>
+                    <h3>{snap.hosting === "cloudflare" ? "本站地址" : "本机地址"}</h3>
                     <p className="muted">{clinicUrl}</p>
-                    <p className="muted">同一 Wi‑Fi 的手机用这个地址打开（以终端打印的局域网 IP 为准）。</p>
+                    <p className="muted">{snap.hosting === "cloudflare" ? "通过 Cloudflare Access 登录后使用。数据由 Cloudflare 保存，无需治疗室电脑常开。" : "同一 Wi‑Fi 的手机用这个地址打开（以终端打印的局域网 IP 为准）。"}</p>
                   </>
                 ) : null}
                 <h3>任务提醒</h3>
@@ -168,7 +169,8 @@ export function SettingsSheet({ snap, pending, error, run, onClose, onRefresh })
                 {exportAgeDays != null && exportAgeDays >= 7 ? (
                   <p className="error">已经超过 7 天没导出，建议现在拷一份机外备份。</p>
                 ) : null}
-                <p className="muted">导出会下载完整 JSON；导入会替换本机全部数据，请先确认。</p>
+                <p className="muted">导出会下载完整 JSON；导入会替换治疗室全部数据，请先确认。{snap.hosting === "cloudflare" ? "云版数据及导入上限约 8MB；大文件请联系维护者迁移。" : ""}</p>
+                {snap.hosting === "cloudflare" ? <CloudBackups pending={pending} run={run} download={downloadExport} onRefresh={onRefresh} onClose={onClose} /> : null}
                 {/* 微信内置浏览器大概率不执行 blob 下载：别让人以为备份成功了。 */}
                 {/MicroMessenger/i.test(navigator.userAgent) ? (
                   <p className="error">微信里可能下载不了导出文件：用系统浏览器打开上面的本机地址再导出。</p>

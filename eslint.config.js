@@ -18,13 +18,19 @@ const nodeGlobals = {
   setInterval: "readonly",
   clearInterval: "readonly",
   AbortController: "readonly",
+  AbortSignal: "readonly",
   Blob: "readonly",
   FormData: "readonly",
   performance: "readonly",
+  Request: "readonly",
+  Response: "readonly",
+  Headers: "readonly",
+  TextEncoder: "readonly",
+  TextDecoder: "readonly",
 }
 
 export default [
-  { ignores: ["client/dist/**", "client/public/**", "data/**", "node_modules/**", ".tower/**", ".agents/**", "dist-e2e/**", "client/dist-e2e/**"] },
+  { ignores: ["client/dist/**", "client/public/**", "data/**", "node_modules/**", ".tower/**", ".agents/**", ".wrangler/**", "dist-e2e/**", "client/dist-e2e/**"] },
   js.configs.recommended,
   {
     files: ["**/*.{js,jsx,mjs}"],
@@ -82,6 +88,13 @@ export default [
         confirm: "readonly",
       },
     },
+  },
+  {
+    files: ["cloudflare/**/*.js"],
+    languageOptions: { ecmaVersion: 2024, sourceType: "module", globals: {
+      ...nodeGlobals, Request: "readonly", Response: "readonly", Headers: "readonly",
+      TextEncoder: "readonly", TextDecoder: "readonly", WebSocketPair: "readonly", WebSocketRequestResponsePair: "readonly",
+    } },
   },
   {
     files: ["shared/**/*.js"],

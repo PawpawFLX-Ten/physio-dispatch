@@ -64,6 +64,9 @@ function withDevice(path) {
 }
 
 export const api = {
+  cloudBackups: () => request(withDevice("/api/cloud/backups")),
+  cloudBackup: (backupId) => request(withDevice(`/api/cloud/backups/${encodeURIComponent(backupId)}`)),
+  restoreCloudBackup: (backupId, expectedSequence) => request(`/api/cloud/backups/${encodeURIComponent(backupId)}/restore`, { method: "POST", body: { expectedSequence } }),
   session: () => request(withDevice("/api/session")),
   setup: (staffName) => request("/api/setup", { method: "POST", body: { staffName } }),
   claim: (body) => request("/api/claim", { method: "POST", body }),

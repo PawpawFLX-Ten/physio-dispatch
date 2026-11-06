@@ -1,7 +1,7 @@
 // 落盘的事都在这：原子写、备份、审计、导入导出。
 import fs from "node:fs"
 import path from "node:path"
-import { emptyState, fail, normalizeLoadedState, sanitizeState, two } from "./helpers.js"
+import { emptyState, fail, normalizeLoadedState, two } from "./helpers.js"
 
 const BACKUP_INTERVAL_MS = 60_000
 const BACKUP_KEEP = 30
@@ -145,36 +145,6 @@ export const ioMethods = {
     return null
   },
 
-  // 「病人 → 来过哪几天」的索引，visitHistory / patientLastDays 不用每次全量翻历史。
-  // 索引不跟着写路径维护：读之前对一遍「天数键 + 各天条目数」的签名，对不上就重建。
-  // 签名只数各天 entries.length，代价小；旁路改动（测试直接挪 state.days、导入整份数据）
-  // 也不会读出脏结果。
-  rebuildDayIndex() {
-    this.byPatient = new Map()
-    for (const [day, record] of Object.entries(this.state.days || {})) {
-      for (const entry of record?.entries || []) {
-        if (!entry?.patientId) continue
-        const list = this.byPatient.get(entry.patientId) || []
-        list.push({ day, entryId: entry.id })
-        this.byPatient.set(entry.patientId, list)
-      }
-    }
-    this.indexedDays = this.daysSignature()
-  },
-
-  daysSignature() {
-    const days = this.state.days || {}
-    const parts = []
-    for (const key of Object.keys(days)) {
-      parts.push(`${key}:${days[key]?.entries?.length || 0}`)
-    }
-    return parts.join("|")
-  },
-
-  ensureDayIndex() {
-    if (this.indexedDays !== this.daysSignature()) this.rebuildDayIndex()
-  },
-
   // 写穿到磁盘：文件内容和目录项都 fsync，掉电后 clinic.json 不会变空。
   // 单行紧凑 JSON：数据按年增长（每天 20 单约 20-35MB/年），缩进排版会让每次
   // 保存都白写近一倍的字节，读侧 JSON.parse 不在乎格式。
@@ -204,33 +174,4 @@ export const ioMethods = {
     this.emitChange()
   },
 
-  exportData(deviceId) {
-    this.requireStaff(deviceId)
-    this.state.lastExportAt = new Date().toISOString()
-    this.save()
-    this.audit(deviceId, "导出数据")
-    return structuredClone(this.state)
-  },
-
-  importData({ deviceId, data }) {
-    const staff = this.requireStaff(deviceId)
-    const next = sanitizeState(data)
-    // 导入的名单里有当前这个人，就保住这台手机的绑定，导入完不用重新进门。
-    if (next.staff.some((person) => person.id === staff.id)) next.devices[deviceId] = staff.id
-    const prev = this.state
-    this.state = next
-    this.rebuildDayIndex()
-    try {
-      // 先确认新数据能正常投影再落盘：万一视图还有意外，坏数据不至于写进档案。
-      const result = this.view(deviceId)
-      this.save()
-      this.audit(deviceId, "导入数据", { 病人: next.patients.length, 名单: next.staff.length })
-      return result
-    } catch (error) {
-      // 落盘失败（比如磁盘满）：内存回到导入前，别让内存和磁盘各说各话、重启后「回到过去」。
-      this.state = prev
-      this.rebuildDayIndex()
-      throw error
-    }
-  },
 }

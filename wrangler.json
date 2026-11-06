@@ -1,0 +1,32 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "physio-dispatch",
+  "main": "cloudflare/worker.js",
+  "compatibility_date": "2026-11-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [{ "pattern": "physio.pawpawmaster.com", "custom_domain": true }],
+  "assets": {
+    "directory": "./client/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": true
+  },
+  "durable_objects": { "bindings": [{ "name": "CLINIC", "class_name": "ClinicRoom" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ClinicRoom"] }],
+  "vars": {
+    "CLINIC_ID": "pawpawmaster-physio-production",
+    "ACCESS_TEAM_DOMAIN": "",
+    "ACCESS_AUD": ""
+  },
+  "env": {
+    "local": {
+      "workers_dev": false,
+      "preview_urls": false,
+      "routes": [],
+      "vars": { "CLINIC_ID": "local-test-clinic", "LOCAL_DEVELOPMENT": "true" },
+      "durable_objects": { "bindings": [{ "name": "CLINIC", "class_name": "ClinicRoom" }] }
+    }
+  }
+}
