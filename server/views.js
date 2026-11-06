@@ -45,6 +45,9 @@ export const viewMethods = {
     return this.state.templates.map((template) => ({
       id: template.id,
       name: template.name,
+      shortName: template.shortName || "",
+      sequential: Boolean(template.sequential),
+      chiefSide: template.chiefSide || null,
       itemCount: template.items.length,
     }))
   },
@@ -165,6 +168,14 @@ export const viewMethods = {
         const type = equipmentTypeById(item.equipmentTypeId)
         const linkedTargets = Array.isArray(item.linkedTargets) ? structuredClone(item.linkedTargets) : []
         tasks.push({
+          ...this.executionState(entry, item),
+          position: item.position || "",
+          instructions: item.instructions || "",
+          caution: item.caution || "",
+          demoUrl: item.demoUrl || "",
+          problem: item.problem || "",
+          bedLabel: entry.bedLabel || "",
+          supervisorName: this.state.staff.find((person) => person.id === entry.supervisorId)?.name || "主治",
           itemId: item.id,
           entryId: entry.id,
           entryVersion: entryVersion(entry),
@@ -214,7 +225,7 @@ export const viewMethods = {
     // 单人治疗室所有活都是「我的」：档案带出来还没派工的项也能行内完成。
     const solo = this.state.staff.length === 1
     const mine = meId ? entry.items.filter((item) => solo || item.assigneeId === meId) : []
-    const mineNext = mine.find((item) => !item.done) || null
+    const mineNext = mine.find((item) => !item.done && this.executionState(entry, item).canExecute) || null
     return {
       id: entry.id,
       patientId: patient.id,
@@ -232,6 +243,7 @@ export const viewMethods = {
       visitCount: this.visitCountOf(patient.id),
       version: entryVersion(entry),
       note: patient.note || "",
+      needsReview: entry.items.filter((item) => !item.done && item.problem).length,
     }
   },
 
@@ -492,7 +504,10 @@ export const viewMethods = {
         // 离开时问不问「记回病症」：改过、且这轮还没答过才问。
         leaveAsk: this.diverged(entry) && !entry.divergedAcked,
         version: entryVersion(entry),
-        items: entry.items.map((item) => this.presentItem(item)),
+        items: entry.items.map((item) => ({ ...this.presentItem(item), ...this.executionState(entry, item) })),
+        sequential: Boolean(entry.sequential),
+        bedLabel: entry.bedLabel || "",
+        supervisorId: entry.supervisorId || null,
       },
     }
   },
@@ -502,6 +517,7 @@ export const viewMethods = {
     return entry.conditionIds.some((conditionId) => {
       const condition = this.condition(patient, conditionId)
       if (!condition || condition.fresh) return false
+      if (Boolean(condition.sequential) !== Boolean(entry.sequential)) return true
       if (
         entry.conditionIds.length === 1 &&
         (condition.chiefSiteId !== entry.chiefSiteId || (condition.chiefSide || null) !== (entry.chiefSide || null))

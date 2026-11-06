@@ -7,14 +7,15 @@
     "start": "node server/index.js",
     "build": "vite build --config client/vite.config.js",
     "client": "vite --config client/vite.config.js --host 0.0.0.0 --port 5173",
-    "test": "node --test tests/store.test.mjs tests/quick-order.test.mjs tests/body-pick.test.mjs tests/body-marks.test.mjs tests/pinyin.test.mjs tests/events.test.mjs tests/equipment.test.mjs",
+    "test": "node --test tests/store.test.mjs tests/quick-order.test.mjs tests/body-pick.test.mjs tests/body-marks.test.mjs tests/pinyin.test.mjs tests/events.test.mjs tests/equipment.test.mjs tests/order-workflow.test.mjs",
     "test:ui": "node scripts/ui-e2e.mjs",
     "start:clinic": "bash scripts/start-clinic.sh",
     "optimize:body": "node scripts/optimize-body.mjs",
     "icons": "node scripts/make-icons.mjs",
     "lint": "eslint .",
     "test:equipment": "node scripts/equipment-e2e.mjs",
-    "test:all": "npm test && npm run lint && npm run build && npm run test:ui && npm run test:equipment"
+    "test:workflow": "node scripts/workflow-e2e.mjs",
+    "test:all": "npm test && npm run lint && npm run build && npm run test:ui && npm run test:equipment && npm run test:workflow"
   },
   "dependencies": {
     "compression": "^1.8.2",

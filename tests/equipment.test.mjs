@@ -987,7 +987,7 @@ test("myTasks flattens today in global order, keeps done items and includes solo
   assert.equal(solo.view("doc").myTasks.some((task) => task.itemId === legacy.id), true)
 })
 
-test("reassignOpen moves only open tasks, releases locks, bumps versions and updates lastAssignee", () => {
+test("reassignOpen moves only open tasks, preserves live locks, bumps versions and updates lastAssignee", () => {
   const { store } = openStore()
   const first = patientWithChief(store, "right", "右膝疼痛")
   const second = store.createPatient({ deviceId: "doc", name: "李叔", conditionName: "左肩痛" })
@@ -1073,16 +1073,16 @@ test("reassignOpen moves only open tasks, releases locks, bumps versions and upd
 
   const movedLock = firstAfter.items.find((item) => item.id === lockedItem.id)
   assert.equal(movedLock.assigneeId, aide.id)
-  assert.equal(movedLock.startedAt, null)
-  assert.equal(movedLock.startedBy, null)
+  assert.ok(movedLock.startedAt)
+  assert.equal(movedLock.startedBy, doc.id)
   const stillCompleted = firstAfter.items.find((item) => item.id === completedItem.id)
   assert.equal(stillCompleted.assigneeId, doc.id)
   assert.equal(stillCompleted.done, true)
   assert.equal(stillCompleted.completedAt, completedAt)
   const movedOther = secondAfter.items.find((item) => item.id === otherLockedItem.id)
   assert.equal(movedOther.assigneeId, aide.id)
-  assert.equal(movedOther.startedAt, null)
-  assert.equal(movedOther.startedBy, null)
+  assert.ok(movedOther.startedAt)
+  assert.equal(movedOther.startedBy, doc.id)
   const stillAideOwn = secondAfter.items.find((item) => item.id === aideOwnItem.id)
   assert.equal(stillAideOwn.assigneeId, aide.id)
 
@@ -1097,8 +1097,8 @@ test("reassignOpen moves only open tasks, releases locks, bumps versions and upd
   const ultrasoundGroup = store.view("doc").todayByEquipment.find(
     (group) => group.equipmentUnitId === "ultrasound-1",
   )
-  assert.equal(ultrasoundGroup.activeTask, null)
-  assert.equal(ultrasoundGroup.status, "occupied")
+  assert.equal(ultrasoundGroup.activeTask.itemId, lockedItem.id)
+  assert.equal(ultrasoundGroup.status, "in_use")
 })
 
 test("reassignOpen with nothing to move returns count zero without creating an empty today", () => {
@@ -1210,6 +1210,8 @@ test("templates, repeat and restore create tasks without copying a live lock", (
   assert.equal(fromTemplate.entry.items[0].startedAt, null)
   assert.equal(fromTemplate.entry.items[0].startedBy, null)
 
+  assert.throws(() => store.removeItem({ deviceId: "doc", entryId: created.entry.id, itemId: item.id }), /仍在使用/)
+  store.patchItem({ deviceId: "doc", entryId: created.entry.id, itemId: item.id, patch: { started: false } })
   store.removeItem({ deviceId: "doc", entryId: created.entry.id, itemId: item.id })
   const restored = store.restoreItem({
     deviceId: "doc",

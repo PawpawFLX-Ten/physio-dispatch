@@ -65,7 +65,7 @@ export function ListPicker({
         className="patient-quick"
         onSubmit={(event) => {
           event.preventDefault()
-          if (pending || !hasSomething) return
+          if (pending || !hasSomething || parsed.issues?.length || parsed.unknown.length) return
           onQuickAdd(parsed, () => setQuickText(""))
         }}
       >
@@ -105,7 +105,7 @@ export function ListPicker({
                     : doseLabel(item.technique, item.dose)
                   return (
                     <li key={index}>
-                      {[targetTitle(item.targetId, item.side), detail, dose].filter(Boolean).join(" · ")}
+                      {[targetTitle(item.targetId, item.side), detail, dose, item.assigneeName ? `给${item.assigneeName}` : ""].filter(Boolean).join(" · ")}
                     </li>
                   )
                 })}
@@ -129,10 +129,12 @@ export function ListPicker({
                 ))}
               </p>
             ) : null}
+            {parsed.issues?.map((issue) => <p key={issue} className="error">{issue}</p>)}
+            {parsed.omitted?.map((phrase) => <p key={phrase} className="muted">已排除：{phrase}（不会删除已有项；改单请用首页吩咐）</p>)}
             <button
               type="submit"
               className="primary"
-              disabled={pending || !hasSomething}
+              disabled={pending || !hasSomething || Boolean(parsed.issues?.length) || parsed.unknown.length > 0}
             >
               {parsed.items.length ? `加 ${parsed.items.length} 项` : "只记要治的地方"}
             </button>

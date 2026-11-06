@@ -907,6 +907,26 @@
 }
 
 /* 今日单全局吩咐：底部弹层里完成选病人、说一句、预览、提交。 */
+.command-shortcuts { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+.command-shortcuts button { min-height: 44px; }
+.command-draft-items { padding-left: 22px; }
+.command-draft-items li { padding: 10px 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
+.command-draft-items p { margin: 5px 0; white-space: pre-wrap; }
+.today-command-patient-conditions { display: block; }
+.today-command-sheet .muted { font-size: 14px; margin: 10px 0; }
+.execution-card.today-my-wrap { display: block; padding: 16px; border: 1px solid var(--line); border-radius: 18px; background: var(--card); }
+.execution-card.is-current { border: 2px solid var(--accent); }
+.execution-card p { margin: 8px 0; overflow-wrap: anywhere; }
+.execution-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.execution-heading h3 { margin: 0; font-size: 18px; }
+.execution-target { margin: 8px 0; font-size: 24px; overflow-wrap: anywhere; }
+.execution-status { color: var(--accent); font-size: 15px; font-weight: 700; }
+.execution-detail { font-size: 18px; line-height: 1.6; }
+.execution-instructions { white-space: pre-wrap; line-height: 1.6; }
+.execution-card .execution-actions { display: flex; flex-direction: row; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.execution-actions button { flex: 1 1 140px; min-height: 52px; }
+.execution-report { margin-top: 16px; }
+
 .today-command-sheet {
   max-height: min(90vh, 780px);
 }
@@ -1047,6 +1067,8 @@
 }
 
 .today-command-submit {
+  position: sticky;
+  bottom: 0;
   width: 100%;
   min-height: 52px;
 }

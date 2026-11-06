@@ -2,3 +2,19 @@ node_modules
 data
 dist
 dist-e2e
+
+# Local worktrees and agent state are not application source.
+.agents/
+.tower/
+
+# Patient exports, runtime logs, environment secrets and TLS private material.
+clinic-*.json
+*.log
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+*.crt

@@ -1,5 +1,6 @@
 // 病人页的纯函数和常量：不碰 React、不碰 this，好测好搬。
 import { techniqueLabel, directionLabel, doseLabel, hasSides, targetById, targetTitle } from "@shared/catalog.js"
+import { instructionFields } from "@shared/workflow.js"
 
 export const blankNotice = { text: "", tone: "ok" }
 export const pastMidnightNotice = {
@@ -42,6 +43,7 @@ export function conditionText(entry) {
 // 撤销恢复用的持久化字段快照（不含界面展示名）。
 export function itemSnapshot(item) {
   return {
+    ...instructionFields(item),
     id: item.id,
     conditionId: item.conditionId,
     sourceItemId: item.sourceItemId ?? null,

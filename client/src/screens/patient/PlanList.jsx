@@ -39,6 +39,7 @@ export function TreatmentRow({ item, index, current, solo, dragging, offsetY, sw
             </p>
           ) : null}
           <p className={equipment ? "patient-meta is-equipment" : "patient-meta"}>{cardDetail}</p>
+          {!item.done && item.canExecute === false ? <p className="patient-meta error">{item.reason}</p> : null}
         </div>
         {!solo ? (
           <button
@@ -57,6 +58,7 @@ export function TreatmentRow({ item, index, current, solo, dragging, offsetY, sw
           className={item.done ? "patient-done is-done" : "patient-done"}
           data-stop=""
           aria-pressed={item.done}
+          disabled={!item.done && item.canExecute === false}
           onPointerDown={(event) => event.stopPropagation()}
           onClick={onToggle}
         >

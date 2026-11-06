@@ -6,7 +6,7 @@ function handoffError(err) {
   return err instanceof Error ? err.message : "未能移交"
 }
 
-// 按人视图的跨病人移交：只列其他员工，设备使用中的软占用由服务端在移交时释放。
+// 按人移交责任人，不改变设备真实使用状态。
 export function TodayHandoffSheet({ snap, group, onClose, onSnap, onDone }) {
   const [pendingId, setPendingId] = useState(null)
   const [error, setError] = useState("")
@@ -47,7 +47,7 @@ export function TodayHandoffSheet({ snap, group, onClose, onSnap, onDone }) {
           </div>
           <button type="button" className="today-gear" onClick={onClose}>收起</button>
         </div>
-        <p className="today-handoff-hint">跨病人整批移交；设备使用中的占用会一并释放。</p>
+        <p className="today-handoff-hint">跨病人整批移交；仍在使用的设备保持占用，请当面交接。</p>
         {error ? <p className="error today-handoff-error" role="alert">{error}</p> : null}
         <div className="today-handoff-list">
           {peers.length ? peers.map((person) => (

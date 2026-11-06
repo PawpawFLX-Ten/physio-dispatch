@@ -24,7 +24,7 @@ const nodeGlobals = {
 }
 
 export default [
-  { ignores: ["client/dist/**", "client/public/**", "data/**", "node_modules/**", ".tower/**", "dist-e2e/**", "client/dist-e2e/**"] },
+  { ignores: ["client/dist/**", "client/public/**", "data/**", "node_modules/**", ".tower/**", ".agents/**", "dist-e2e/**", "client/dist-e2e/**"] },
   js.configs.recommended,
   {
     files: ["**/*.{js,jsx,mjs}"],

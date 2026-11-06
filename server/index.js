@@ -99,6 +99,9 @@ app.delete(
   asyncRoute((req) => store.deleteTemplate({ deviceId: req.body?.deviceId || req.query?.deviceId, templateId: req.params.id })),
 )
 app.post("/api/today/entries", asyncRoute((req) => store.addExisting(req.body)))
+app.post("/api/orders/preview", asyncRoute((req) => store.previewOrder(req.body)))
+app.post("/api/orders/dispatch", asyncRoute((req) => store.dispatchOrder(req.body)))
+app.post("/api/entries/:id/workflow", asyncRoute((req) => store.configureWorkflow({ ...req.body, entryId: req.params.id })))
 app.post("/api/today/entries/repeat-last", asyncRoute((req) => store.repeatLastDay(req.body)))
 app.post("/api/today/entries/carry-unfinished", asyncRoute((req) => store.carryUnfinished(req.body)))
 app.post("/api/today/reassign-open", asyncRoute((req) => store.reassignOpen(req.body)))

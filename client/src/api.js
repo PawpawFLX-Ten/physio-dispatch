@@ -68,14 +68,17 @@ export const api = {
   setup: (staffName) => request("/api/setup", { method: "POST", body: { staffName } }),
   claim: (body) => request("/api/claim", { method: "POST", body }),
   createPatient: (name, conditionName) => request("/api/patients", { method: "POST", body: { name, conditionName } }),
-  createPatientFromTemplate: (name, templateId) =>
-    request("/api/patients/from-template", { method: "POST", body: { name, templateId } }),
-  saveTemplateFromEntry: (entryId, conditionId, name) =>
-    request("/api/templates", { method: "POST", body: { entryId, conditionId, name } }),
+  createPatientFromTemplate: (name, templateId, side) =>
+    request("/api/patients/from-template", { method: "POST", body: { name, templateId, side } }),
+  saveTemplateFromEntry: (entryId, conditionId, name, shortName) =>
+    request("/api/templates", { method: "POST", body: { entryId, conditionId, name, shortName } }),
   // DELETE 也把 deviceId 放进 query：个别代理会剥掉 DELETE 的 body。
   deleteTemplate: (templateId) => request(withDevice(`/api/templates/${templateId}`), { method: "DELETE", body: {} }),
-  applyTemplateToEntry: (entryId, templateId) =>
-    request(`/api/entries/${entryId}/apply-template`, { method: "POST", body: { templateId } }),
+  applyTemplateToEntry: (entryId, templateId, extra = {}) =>
+    request(`/api/entries/${entryId}/apply-template`, { method: "POST", body: { templateId, ...extra } }),
+  previewOrder: (input) => request("/api/orders/preview", { method: "POST", body: input }),
+  dispatchOrder: (input) => request("/api/orders/dispatch", { method: "POST", body: input }),
+  configureWorkflow: (entryId, input) => request(`/api/entries/${entryId}/workflow`, { method: "POST", body: input }),
   // 常见搭配：整张表一次存下，覆盖默认。
   savePairings: (pairings) => request("/api/pairings", { method: "POST", body: { pairings } }),
   quickAdd: (entryId, parsed) =>
@@ -133,7 +136,7 @@ export const api = {
       method: "POST",
       body: { assigneeId, ...(expectedVersion != null ? { expectedVersion } : {}) },
     }),
-  // 跨病人把某人今天的未完成项整批移交；设备使用中的锁会在移交时释放。
+  // 交接负责人，保留真实设备占用。
   reassignOpen: (fromStaffId, toStaffId) =>
     request("/api/today/reassign-open", { method: "POST", body: { fromStaffId, toStaffId } }),
   includeCondition: (id, conditionId) => request(`/api/entries/${id}/include`, { method: "POST", body: { conditionId } }),

@@ -20,6 +20,7 @@ import { EquipmentEditor } from "./patient/EquipmentEditor.jsx"
 import { EquipmentPicker } from "./patient/EquipmentPicker.jsx"
 import { ListPicker } from "./patient/ListPicker.jsx"
 import { DoseControl, PlanList } from "./patient/PlanList.jsx"
+import { InstructionsEditor, WorkflowControls } from "./patient/InstructionsEditor.jsx"
 import { Notice, Sheet } from "./patient/ui.jsx"
 import {
   blankNotice,
@@ -66,6 +67,9 @@ export function PatientDay({ entryId, initial, pulse, live = true, onBack }) {
   const [saveTmplOpen, setSaveTmplOpen] = useState(false)
   const [applyTmplOpen, setApplyTmplOpen] = useState(false)
   const [templateName, setTemplateName] = useState("")
+  const [templateShortName, setTemplateShortName] = useState("")
+  const [templateSide, setTemplateSide] = useState("")
+  const [templateMode, setTemplateMode] = useState("today")
   const [undo, setUndo] = useState(null)
   const [listOpen, setListOpen] = useState(false)
   const [listQuery, setListQuery] = useState("")
@@ -554,7 +558,7 @@ export function PatientDay({ entryId, initial, pulse, live = true, onBack }) {
     event.preventDefault()
     const conditionId =
       (entry?.conditionIds || []).length === 1 ? entry.conditionIds[0] : entry?.focusConditionId || null
-    const ok = await mutate(() => api.saveTemplateFromEntry(entryId, conditionId, templateName.trim()), {
+    const ok = await mutate(() => api.saveTemplateFromEntry(entryId, conditionId, templateName.trim(), templateShortName), {
       success: "已存为模板",
     })
     if (ok) {
@@ -564,13 +568,17 @@ export function PatientDay({ entryId, initial, pulse, live = true, onBack }) {
   }
 
   function applyTemplate(templateId) {
-    mutate(() => api.applyTemplateToEntry(entryId, templateId), { success: "模板已加入今天" }).then((ok) => {
+    mutate(() => api.applyTemplateToEntry(entryId, templateId, { side: templateSide || undefined, mode: templateMode, expectedVersion: entryVersionRef.current }), { success: "模板已加入今天" }).then((ok) => {
       if (ok) setApplyTmplOpen(false)
     })
   }
 
   // 「说一句」的解析结果一次入库，面板留着继续说下一句。
   function quickAddParsed(parsed, afterSave) {
+    if (parsed.issues?.length || parsed.unknown?.length) {
+      setNotice({ text: "还有未确认的内容，请改清楚再提交", tone: "error" })
+      return
+    }
     // 解析器允许“没说侧别”，但器械项服务端是严格侧别；提交前统一把可侧化项落实成左/右。
     const safeParsed = normalizeQuickOrderSides(parsed, {
       chiefSide: entry?.chiefSide,
@@ -585,6 +593,7 @@ export function PatientDay({ entryId, initial, pulse, live = true, onBack }) {
       chief: safeParsed.chief,
       items: safeParsed.items,
       assigneeId: safeParsed.assigneeId || null,
+      expectedVersion: entryVersionRef.current,
     }
     mutate(() => api.quickAdd(entryId, payload), {
       success: safeParsed.items.length ? `已加 ${safeParsed.items.length} 项` : "已记要治的地方",
@@ -883,6 +892,8 @@ export function PatientDay({ entryId, initial, pulse, live = true, onBack }) {
         ) : null}
         {entry.archived ? <p className="muted">已归档 · 不会出现在加入病人列表</p> : null}
         {names ? <p className="patient-conditions">{names}</p> : null}
+        {entry.bedLabel ? <p>{entry.bedLabel}</p> : null}
+        {entry.sequential ? <p className="muted">按顺序执行 · 前一步完成后再做下一步</p> : null}
         {entry.note ? (
           <p className="patient-note" role="note">{`⚠ ${entry.note}`}</p>
         ) : null}
@@ -1042,6 +1053,7 @@ export function PatientDay({ entryId, initial, pulse, live = true, onBack }) {
       {moreOpen && !leaveAsk ? (
         <Sheet title="更多" onClose={() => setMoreOpen(false)}>
           <Notice notice={notice} />
+          <WorkflowControls key={entry.id} entry={entry} pending={pending} onSave={(input) => mutate(() => api.configureWorkflow(entryId, { ...input, expectedVersion: entryVersionRef.current }), { success: "执行安排已保存" })} />
           {entry.items?.length > 0 ? (
             <button
               type="button"
@@ -1050,6 +1062,7 @@ export function PatientDay({ entryId, initial, pulse, live = true, onBack }) {
               onClick={() => {
                 setMoreOpen(false)
                 setTemplateName(focusName)
+                setTemplateShortName("")
                 setSaveTmplOpen(true)
               }}
             >
@@ -1339,6 +1352,7 @@ export function PatientDay({ entryId, initial, pulse, live = true, onBack }) {
                 onChange={(event) => setTemplateName(event.target.value)}
               />
             </label>
+            <label className="field">方案简称（可选）<input value={templateShortName} maxLength={40} placeholder="例如 A方案" onChange={(event) => setTemplateShortName(event.target.value)} /></label>
             <button className="primary" type="submit" disabled={pending}>存下</button>
           </form>
         </Sheet>
@@ -1347,7 +1361,9 @@ export function PatientDay({ entryId, initial, pulse, live = true, onBack }) {
       {applyTmplOpen && !leaveAsk ? (
         <Sheet title="套用模板" onClose={() => setApplyTmplOpen(false)}>
           <Notice notice={notice} />
-          <p className="muted">选一条模板，作为新病症加入今天。</p>
+          <p className="muted">套用只添加步骤；整单替换并预览请用首页「吩咐」。</p>
+          <label className="field">整套侧别<select value={templateSide} onChange={(event) => setTemplateSide(event.target.value)}><option value="">沿用模板侧别</option><option value="left">左侧</option><option value="right">右侧</option><option value="both">双侧</option></select></label>
+          <label className="field">怎么使用<select value={templateMode} onChange={(event) => setTemplateMode(event.target.value)}><option value="today">只加入今天，不新增病症</option><option value="condition">同时新增一条病症</option></select></label>
           <div className="patient-stack">
             {templates.map((template) => (
               <button
@@ -1367,6 +1383,7 @@ export function PatientDay({ entryId, initial, pulse, live = true, onBack }) {
       {activeItem && !leaveAsk ? (
         <Sheet title={targetTitle(activeItem.targetId, activeItem.side)} onClose={() => setActiveItemId(null)}>
           <Notice notice={notice} />
+          <InstructionsEditor key={activeItem.id} item={activeItem} pending={pending} onSave={(patch) => mutate(() => withVersion((v) => api.patchItem(entryId, activeItem.id, patch, v)), { success: "操作说明已保存" })} />
           {activeEquipment ? (
             <EquipmentEditor
               key={activeEquipmentEditorKey}

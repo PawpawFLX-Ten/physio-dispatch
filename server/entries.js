@@ -18,6 +18,7 @@ import {
   sanitizeEquipmentParameters,
 } from "../shared/equipment.js"
 import { assertExpectedVersion, bumpEntryVersion, fail, id, normalizeSide, todayKey } from "./helpers.js"
+import { instructionFields } from "../shared/workflow.js"
 
 // 下手项的部位必须真实存在；纯 site 仍只能作为主诉，kind=both 的区域可做设备/区域级下手项。
 // 点选、说一句、撤销插回三条路共用同一句报错。
@@ -41,6 +42,7 @@ function hasOwn(object, key) {
 // 病症存档和今日项共用同一组器械字段，避免今天用了设备、回写时却悄悄丢设备。
 function equipmentFieldsOf(item) {
   return {
+    ...instructionFields(item),
     equipmentTypeId: typeof item?.equipmentTypeId === "string" ? item.equipmentTypeId : null,
     equipmentUnitId: typeof item?.equipmentUnitId === "string" ? item.equipmentUnitId : null,
     exerciseTemplateId: typeof item?.exerciseTemplateId === "string" ? item.exerciseTemplateId : null,
@@ -98,7 +100,7 @@ function resolveAssignee(store, input, previous, staff) {
 
 // 新 item 的唯一预校验入口：只返回完整数据，不碰 entry。调用方把全部项都算完后再 splice。
 // options.fallbackChiefSide 让 quickAdd 本轮刚设的主诉侧也能给下属项兜底。
-function prepareNewItem({ store, staff, entry, input, previous, fallbackTechnique, inheritPrevious, options = {} }) {
+export function prepareNewItem({ store, staff, entry, input, previous, fallbackTechnique, inheritPrevious, options = {} }) {
   if (!input || typeof input !== "object" || Array.isArray(input)) fail(400, "缺少要加的项")
 
   const templateId =
@@ -224,6 +226,7 @@ function prepareNewItem({ store, staff, entry, input, previous, fallbackTechniqu
   const assigneeId = resolveAssignee(store, input, previous, staff)
 
   return {
+    ...instructionFields(input),
     targetId,
     side,
     technique,
@@ -319,6 +322,7 @@ export const entryMethods = {
       focusConditionId: last.conditionIds[last.conditionIds.length - 1],
       chiefSiteId: last.chiefSiteId,
       chiefSide: last.chiefSide || null,
+      sequential: Boolean(last.sequential),
       version: 0,
       items: last.items.map((item) => ({
         id: id(),
@@ -380,6 +384,7 @@ export const entryMethods = {
       focusConditionId: ids[ids.length - 1],
       chiefSiteId: last.chiefSiteId,
       chiefSide: last.chiefSide || null,
+      sequential: Boolean(last.sequential),
       version: 0,
       items: open.map((item) => ({
         id: id(),
@@ -407,9 +412,11 @@ export const entryMethods = {
 
   // 「说一句」解析结果一次入库，省得一条一条点。
   // 先只读校验整批；任何一项非法都不改主诉、不 splice，最后才一次写入。
-  quickAdd({ deviceId, entryId, chief, items, assigneeId }) {
+  quickAdd({ deviceId, entryId, chief, items, assigneeId, expectedVersion, issues, unknown }) {
     const staff = this.requireStaff(deviceId)
     const entry = this.entryById(entryId)
+    assertExpectedVersion(entry, expectedVersion)
+    if (issues?.length || unknown?.length) fail(400, "还有未确认的口令，请改清楚再提交")
     let chiefChange = null
     if (chief?.targetId) {
       const target = targetById(chief.targetId)
@@ -469,6 +476,7 @@ export const entryMethods = {
     }
     entry.items.push(...prepared)
     touchDiverged(entry)
+    bumpEntryVersion(entry)
     this.save()
     this.audit(deviceId, "说一句加项", { 项数: prepared.length })
     return this.entryView(deviceId, entry.id)
@@ -564,6 +572,7 @@ export const entryMethods = {
       focusConditionId,
       chiefSiteId: first?.chiefSiteId || null,
       chiefSide: first?.chiefSide || null,
+      sequential: Boolean(first?.sequential),
       version: 0,
       items,
     }
@@ -585,6 +594,7 @@ export const entryMethods = {
     patient.conditions.push(condition)
     entry.conditionIds.push(condition.id)
     entry.focusConditionId = condition.id
+    bumpEntryVersion(entry)
     this.save()
     this.audit(deviceId, "新增病症", { 病人: patient.name, 病症: condition.name })
     return this.entryView(deviceId, entry.id)
@@ -598,6 +608,7 @@ export const entryMethods = {
       fail(404, "找不到病症")
     }
     entry.focusConditionId = conditionId
+    bumpEntryVersion(entry)
     this.save()
     this.audit(deviceId, "切换焦点病症", { 病症: this.condition(patient, conditionId)?.name || conditionId })
     return this.entryView(deviceId, entry.id)
@@ -613,6 +624,7 @@ export const entryMethods = {
     entry.chiefSiteId = targetId
     entry.chiefSide = normalizeSide(side)
     touchDiverged(entry)
+    bumpEntryVersion(entry)
     this.save()
     this.audit(deviceId, "改要治的位置", { 位置: targetTitle(targetId, normalizeSide(side)) })
     return this.entryView(deviceId, entry.id)
@@ -646,6 +658,7 @@ export const entryMethods = {
     }
     entry.items.push(item)
     touchDiverged(entry)
+    bumpEntryVersion(entry)
     this.save()
     this.audit(deviceId, "点选一项", { 位置: targetTitle(item.targetId, item.side), 派给: staff.name })
     return this.entryView(deviceId, entry.id)
@@ -714,6 +727,17 @@ export const entryMethods = {
     if (!patch || typeof patch !== "object" || Array.isArray(patch)) fail(400, "改动格式不对")
     const item = entry.items.find((row) => row.id === itemId)
     if (!item) fail(404, "找不到这一项")
+    if (hasOwn(patch, "expectedInstructions") && JSON.stringify(instructionFields(patch.expectedInstructions)) !== JSON.stringify(instructionFields(item))) {
+      fail(409, "操作说明已被别人更新，请载入最新说明后再保存")
+    }
+    if (item.startedAt && patch.started !== false && ["technique", "side"].some((key) => hasOwn(patch, key))) {
+      fail(409, "设备使用中，请先结束使用再改治疗内容")
+    }
+
+    if ((!item.done && patch.done === true) || (!item.startedAt && patch.started === true)) {
+      const execution = this.executionState(entry, item)
+      if (!execution.canExecute) fail(409, execution.reason)
+    }
 
     if (hasOwn(patch, "started") && typeof patch.started !== "boolean") fail(400, "开始状态格式不对")
     if (hasOwn(patch, "technique") && !TECHNIQUES.some((row) => row.id === patch.technique)) {
@@ -730,6 +754,18 @@ export const entryMethods = {
     const candidate = structuredClone(item)
     let touched = false
     let patientAssigneeId = null
+    for (const key of ["position", "instructions", "caution", "demoUrl"]) {
+      if (!hasOwn(patch, key)) continue
+      if (typeof patch[key] !== "string") fail(400, "操作说明格式不对")
+      if (key === "demoUrl" && patch[key] && !/^https:\/\//i.test(patch[key])) fail(400, "示范链接需要 HTTPS 地址")
+      candidate[key] = instructionFields({ [key]: patch[key] })[key]
+      if (candidate[key] !== (item[key] || "")) touched = true
+    }
+    if (hasOwn(patch, "problem")) {
+      if (typeof patch.problem !== "string") fail(400, "问题格式不对")
+      candidate.problem = patch.problem.trim().slice(0, 500)
+      candidate.problemBy = candidate.problem ? staff.id : null
+    }
 
     if (hasOwn(patch, "technique") && candidate.technique !== patch.technique) {
       // 按摩↔松解↔牵伸都按分钟计：换手法不丢调好的时长；只有换成/换出器械才重置成默认组次。
@@ -823,8 +859,10 @@ export const entryMethods = {
             fail(409, `${unitName}正在被${patientName}使用，请先结束`)
           }
         }
-        candidate.startedAt = new Date().toISOString()
-        candidate.startedBy = staff.id
+        if (!candidate.startedAt) {
+          candidate.startedAt = new Date().toISOString()
+          candidate.startedBy = staff.id
+        }
       } else {
         candidate.startedAt = null
         candidate.startedBy = null
@@ -881,6 +919,7 @@ export const entryMethods = {
     // 删除也带期望版本：别人刚改过这张单时别盲目删，让客户端重拉后再说。
     assertExpectedVersion(entry, expectedVersion)
     const item = entry.items.find((item) => item.id === itemId)
+    if (item?.startedAt) fail(409, "设备仍在使用，请先结束使用再删除")
     entry.items = entry.items.filter((item) => item.id !== itemId)
     touchDiverged(entry)
     bumpEntryVersion(entry)
@@ -976,7 +1015,7 @@ export const entryMethods = {
     return this.entryView(deviceId, entry.id)
   },
 
-  // 跨病人一键移交：只动未完成项；移交即释放设备锁，完成项保持原派工和历史。
+  // 移交责任人不等于结束治疗；保留真实设备占用及最初开始者。
   reassignOpen({ deviceId, fromStaffId, toStaffId }) {
     this.requireStaff(deviceId)
     const from = this.state.staff.find((person) => person.id === fromStaffId) || null
@@ -991,8 +1030,6 @@ export const entryMethods = {
       for (const item of entry.items || []) {
         if (!item || item.done || item.assigneeId !== from.id) continue
         item.assigneeId = to.id
-        item.startedAt = null
-        item.startedBy = null
         changedPatients.add(entry.patientId)
         changed = true
         count += 1
@@ -1018,6 +1055,7 @@ export const entryMethods = {
     const day = this.todayRecord()
     const entry = day.entries.find((item) => item.id === entryId)
     if (!entry) fail(404, "今天没有这张单")
+    if (entry.items.some((item) => item.startedAt)) fail(409, "设备仍在使用，请先结束使用再拿掉今日单")
     // 病人可能已经不在档案里（孤儿条目）：名字拿得到就用，拿不到也照样能拿掉。
     const patient = this.state.patients.find((row) => row.id === entry.patientId)
     const name = patient?.name || entry.patientId
@@ -1046,6 +1084,7 @@ export const entryMethods = {
       condition.chiefSide = entry.chiefSide || null
     }
     condition.fresh = false
+    condition.sequential = Boolean(entry.sequential)
   },
 
   leave({ deviceId, entryId, updateCondition }) {
@@ -1096,6 +1135,7 @@ export const entryMethods = {
       })
     }
     entry.focusConditionId = conditionId
+    bumpEntryVersion(entry)
   },
 
   includeCondition({ deviceId, entryId, conditionId }) {

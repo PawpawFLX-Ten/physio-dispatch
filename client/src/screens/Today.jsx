@@ -1,33 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom"
-import { doseLabel, targetTitle, techniqueLabel } from "@shared/catalog.js"
 import { api } from "../api.js"
 import { matchesInitials } from "../pinyin.js"
 import { SettingsSheet } from "./SettingsSheet.jsx"
 import { TodayCommandSheet } from "./TodayCommandSheet.jsx"
 import { TodayHandoffSheet } from "./TodayHandoffSheet.jsx"
+import { ExecutionCard } from "./ExecutionCard.jsx"
 import { PULL_LIMIT, usePullToRefresh } from "../hooks/usePullToRefresh.js"
 import { useBackLayer } from "../back-layer.js"
 import "./today.css"
 
 function myTaskKey(task) {
   return task?.itemId || task?.id || `${task?.entryId}:${task?.order}`
-}
-
-function isEquipmentTask(task) {
-  return Boolean(task && (task.technique === "equipment" || task.equipmentTypeId))
-}
-
-function myTaskTarget(task) {
-  return task?.targetTitle || (task?.targetId ? targetTitle(task.targetId, task.side || null) : "")
-}
-
-function myTaskDetail(task) {
-  if (!isEquipmentTask(task)) {
-    return [techniqueLabel(task?.technique), doseLabel(task?.technique, task?.dose)].filter(Boolean).join(" · ")
-  }
-  const dose = task?.dose?.sets || task?.dose?.reps ? doseLabel("equipment", task.dose) : ""
-  return [task.equipmentSummary || task.equipmentTypeName || "器械", dose].filter(Boolean).join(" · ")
 }
 
 export function Today({ snap, live, changedBy, onRefresh, onSnap, onOpen }) {
@@ -46,13 +30,14 @@ export function Today({ snap, live, changedBy, onRefresh, onSnap, onOpen }) {
   const [commandOpen, setCommandOpen] = useState(false)
   const [commandNotice, setCommandNotice] = useState("")
   const [handoffGroup, setHandoffGroup] = useState(null)
-  const [mineOnly, setMineOnly] = useState(false)
+  const [mineOnly, setMineOnly] = useState(() => localStorage.getItem("physio-today-view") === "mine")
   const [staffView, setStaffView] = useState(false)
   const [equipmentView, setEquipmentView] = useState(false)
   const prevMineCount = useRef(null)
   const [query, setQuery] = useState("")
   const [templatePick, setTemplatePick] = useState(null)
   const [templateName, setTemplateName] = useState("")
+  const [templateSide, setTemplateSide] = useState("")
   // ref 当同步守卫拦双击，state 让按钮变灰看得见。
   const pendingRef = useRef(false)
   const [pending, setPending] = useState(false)
@@ -163,7 +148,7 @@ export function Today({ snap, live, changedBy, onRefresh, onSnap, onOpen }) {
     if (!Array.isArray(snap.myTasks)) return []
     return snap.myTasks
       .filter((task) => !task.done)
-      .sort((left, right) => (left.order ?? 0) - (right.order ?? 0))
+      .sort((left, right) => Number(Boolean(right.startedAt)) - Number(Boolean(left.startedAt)) || Number(right.canExecute !== false) - Number(left.canExecute !== false) || (left.order ?? 0) - (right.order ?? 0))
   }, [snap.myTasks])
   const myCompletedCount = myTasks ? myTasks.filter((task) => task.done).length : 0
   // 病人多时今日单也能搜（和加入病人一个习惯：汉字/拼音首字母都行），人少时不占地方。
@@ -234,6 +219,7 @@ export function Today({ snap, live, changedBy, onRefresh, onSnap, onOpen }) {
   // 行内完成：只锁正在做的那一行（别的行照常点），返回值就是最新视图，不再重拉一遍。
   const [busyEntryId, setBusyEntryId] = useState(null)
   const [busyTaskId, setBusyTaskId] = useState(null)
+  const busyTaskRef = useRef(false)
   function completeMine(entry) {
     if (!entry.mineNextId || busyEntryId) return
     setBusyEntryId(entry.id)
@@ -266,12 +252,14 @@ export function Today({ snap, live, changedBy, onRefresh, onSnap, onOpen }) {
   async function patchMyTask(task, patch) {
     const key = myTaskKey(task)
     const itemId = task?.itemId || task?.id
-    if (!task?.entryId || !itemId || busyTaskId) return
+    if (!task?.entryId || !itemId || busyTaskRef.current) return false
+    busyTaskRef.current = true
     setBusyTaskId(key)
     setError("")
     try {
       const next = await api.patchItem(task.entryId, itemId, patch, task.entryVersion)
       onSnap(next)
+      return true
     } catch (err) {
       const starting = patch.started === true
       if (err?.status === 409 && patch.done === true) {
@@ -279,10 +267,10 @@ export function Today({ snap, live, changedBy, onRefresh, onSnap, onOpen }) {
         try {
           const fresh = await api.entry(task.entryId)
           const item = fresh.entry?.items?.find((row) => row.id === itemId)
-          if (item && !item.done) {
+          if (item && !item.done && (snap.solo || item.assigneeId === snap.me?.id) && item.canExecute !== false) {
             const next = await api.patchItem(task.entryId, itemId, patch, fresh.entry?.version)
             onSnap(next)
-            return
+            return true
           }
         } catch {
           /* 重拉也失败：落到下面统一报错 */
@@ -297,20 +285,10 @@ export function Today({ snap, live, changedBy, onRefresh, onSnap, onOpen }) {
         setError(err instanceof Error ? err.message : "未能保存")
       }
     } finally {
+      busyTaskRef.current = false
       setBusyTaskId(null)
     }
-  }
-
-  function completeMyTask(task) {
-    return patchMyTask(task, { done: true })
-  }
-
-  function startMyTask(task) {
-    return patchMyTask(task, { started: true })
-  }
-
-  function endMyTask(task) {
-    return patchMyTask(task, { started: false })
+    return false
   }
 
 
@@ -322,6 +300,7 @@ export function Today({ snap, live, changedBy, onRefresh, onSnap, onOpen }) {
 
   // 四个视图只能亮一个：每次切换都明确关掉另外两个，避免出现“全部 + 按设备”同时选中。
   function selectTodayView(nextView) {
+    localStorage.setItem("physio-today-view", nextView)
     setMineOnly(nextView === "mine")
     setStaffView(nextView === "staff")
     setEquipmentView(nextView === "equipment")
@@ -585,69 +564,9 @@ export function Today({ snap, live, changedBy, onRefresh, onSnap, onOpen }) {
                 <div className="today-my-list">
                   {myOpenTasks.map((task, myIndex) => {
                     const key = myTaskKey(task)
-                    const equipment = isEquipmentTask(task)
-                    const started = Boolean(task.startedAt || task.startedBy || task.started)
-                    const starterName = task.startedByName ||
-                      (snap.staff || []).find((person) => person.id === task.startedBy)?.name ||
-                      "员工"
                     const busy = busyTaskId === key
                     return (
-                      <div key={key} className={started ? "today-my-wrap is-started" : "today-my-wrap"}>
-                        <button
-                          type="button"
-                          className="row-btn today-my-task"
-                          onClick={() => onOpen(task.entryId)}
-                        >
-                          <span className="today-my-order" aria-label={`我的第 ${myIndex + 1} 项`}>
-                            {myIndex + 1}
-                          </span>
-                          <span className="today-my-body">
-                            <span className="today-my-top">
-                              <span className="today-my-patient">{task.patientName}</span>
-                              <span className="today-my-target">{myTaskTarget(task)}</span>
-                            </span>
-                            <span className="today-my-detail">{myTaskDetail(task)}</span>
-                            {task.note ? <span className="today-my-note">{`⚠ ${task.note}`}</span> : null}
-                            {equipment && started ? (
-                              <span className="today-my-use">{`使用中 · ${starterName}`}</span>
-                            ) : null}
-                          </span>
-                          <span className={started ? "today-my-state is-started" : "today-my-state"}>
-                            {task.done ? "已完成" : started ? "使用中" : equipment ? "未开始" : "未完成"}
-                          </span>
-                        </button>
-                        <div className="today-my-actions">
-                          {equipment ? (
-                            started ? (
-                              <button
-                                type="button"
-                                className="secondary today-my-action"
-                                disabled={busy}
-                                onClick={() => endMyTask(task)}
-                              >
-                                结束设备
-                              </button>
-                            ) : (
-                              <button
-                                type="button"
-                                className="secondary today-my-action"
-                                disabled={busy}
-                                onClick={() => startMyTask(task)}
-                              >
-                                开始设备
-                              </button>
-                            )
-                          ) : null}
-                          <button
-                            type="button"
-                            className="primary today-my-action is-done"
-                            disabled={busy}
-                            onClick={() => completeMyTask(task)}
-                          >
-                            {busy ? "保存中…" : "完成"}
-                          </button>
-                        </div>
-                      </div>
+                      <ExecutionCard key={key} task={task} current={myIndex === 0 && task.canExecute !== false} busy={busy} onOpen={() => onOpen(task.entryId)} onPatch={(patch) => patchMyTask(task, patch)} />
                     )
                   })}
                 </div>
@@ -739,6 +658,7 @@ export function Today({ snap, live, changedBy, onRefresh, onSnap, onOpen }) {
                   >
                     <span className="today-name">{entry.patientName}</span>
                     {entry.note ? <span className="today-note">{`⚠ ${entry.note}`}</span> : null}
+                    {entry.needsReview ? <span className="today-note">{`${entry.needsReview} 项需主治处理 · 进入项目卡查看`}</span> : null}
                     {entry.visitCount > 1 ? <span className="today-visit">{`第${entry.visitCount}次来`}</span> : null}
                     {entry.conditionNames?.length ? (
                       <span className="today-conditions">{entry.conditionNames.join("、")}</span>
@@ -927,7 +847,7 @@ export function Today({ snap, live, changedBy, onRefresh, onSnap, onOpen }) {
                         onSubmit={(event) => {
                           event.preventDefault()
                           run(async () => {
-                            const result = await api.createPatientFromTemplate(templateName.trim(), template.id)
+                            const result = await api.createPatientFromTemplate(templateName.trim(), template.id, templateSide || undefined)
                             setTemplatePick(null)
                             setTemplateName("")
                             onOpen(result.entry.id, result)
@@ -945,6 +865,7 @@ export function Today({ snap, live, changedBy, onRefresh, onSnap, onOpen }) {
                             onChange={(event) => setTemplateName(event.target.value)}
                           />
                         </label>
+                        <label className="field">整套侧别<select value={templateSide} onChange={(event) => setTemplateSide(event.target.value)}><option value="">沿用模板</option><option value="left">左侧</option><option value="right">右侧</option><option value="both">双侧</option></select></label>
                         <div className="today-template-buttons">
                           <button type="button" className="secondary" onClick={() => setTemplatePick(null)}>
                             取消
@@ -960,6 +881,7 @@ export function Today({ snap, live, changedBy, onRefresh, onSnap, onOpen }) {
                         onClick={() => {
                           setTemplatePick(template.id)
                           setTemplateName("")
+                          setTemplateSide("")
                         }}
                       >
                         <span className="patient-name">{template.name}</span>

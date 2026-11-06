@@ -9,6 +9,7 @@ import {
   sanitizeLinkedTargets,
 } from "../shared/equipment.js"
 import { sanitizePairings } from "../shared/pairings.js"
+import { instructionFields } from "../shared/workflow.js"
 
 export function id() {
   return crypto.randomUUID()
@@ -51,6 +52,7 @@ export function workSignature(item) {
       ? Object.fromEntries(Object.keys(item.parameters).sort().map((key) => [key, item.parameters[key]]))
       : {}
   return JSON.stringify({
+    ...instructionFields(item),
     targetId: item.targetId,
     side: item.side || null,
     technique: item.technique,
@@ -102,6 +104,7 @@ function sanitizeConditionItem(item) {
   const technique = TECHNIQUES.some((row) => row.id === item.technique) ? item.technique : "massage"
   return {
     ...item,
+    ...instructionFields(item),
     side: normalizeSide(item.side),
     technique,
     dose: clampDose(technique, item.dose),
@@ -177,6 +180,7 @@ function sanitizePatient(patient, staffIds) {
           chiefSiteId: typeof condition.chiefSiteId === "string" ? condition.chiefSiteId : null,
           chiefSide: normalizeSide(condition.chiefSide),
           fresh: Boolean(condition.fresh),
+          sequential: Boolean(condition.sequential),
           items: condition.items
             .filter((item) => item && typeof item === "object" && typeof item.targetId === "string" && item.targetId)
             .map(sanitizeConditionItem),
@@ -207,6 +211,9 @@ export function sanitizeDayEntry(entry, staffIds) {
     focusConditionId: typeof entry.focusConditionId === "string" ? entry.focusConditionId : null,
     chiefSiteId: typeof entry.chiefSiteId === "string" ? entry.chiefSiteId : null,
     chiefSide: normalizeSide(entry.chiefSide),
+    sequential: Boolean(entry.sequential),
+    bedLabel: typeof entry.bedLabel === "string" ? entry.bedLabel.slice(0, 60) : "",
+    supervisorId: staffIds.has(entry.supervisorId) ? entry.supervisorId : null,
     // 导入后这轮答没答过「记回病症」跟着走，别让所有人重答一遍。
     divergedAcked: Boolean(entry.divergedAcked),
     version: entryVersion(entry),
@@ -217,6 +224,7 @@ export function sanitizeDayEntry(entry, staffIds) {
         const direction = DIRECTIONS.some((row) => row.id === item.direction) ? item.direction : "along"
         const done = Boolean(item.done)
         return {
+          ...instructionFields(item),
           id: typeof item.id === "string" && item.id ? item.id : id(),
           conditionId: typeof item.conditionId === "string" ? item.conditionId : null,
           sourceItemId: typeof item.sourceItemId === "string" ? item.sourceItemId : null,
@@ -229,6 +237,8 @@ export function sanitizeDayEntry(entry, staffIds) {
           done,
           completedBy: typeof item.completedBy === "string" ? item.completedBy : null,
           completedAt: done && typeof item.completedAt === "string" ? item.completedAt : null,
+          problem: typeof item.problem === "string" ? item.problem.slice(0, 500) : "",
+          problemBy: staffIds.has(item.problemBy) ? item.problemBy : null,
           ...sanitizeStartedFields({ ...item, done }, staffIds),
           ...sanitizeItemEquipment(item, technique),
         }
@@ -257,6 +267,8 @@ export function sanitizeState(data) {
     .map((template) => ({
       id: typeof template.id === "string" && template.id ? template.id : id(),
       name: template.name.trim(),
+      shortName: typeof template.shortName === "string" ? template.shortName.trim().slice(0, 40) : "",
+      sequential: Boolean(template.sequential),
       chiefSiteId: typeof template.chiefSiteId === "string" ? template.chiefSiteId : null,
       chiefSide: normalizeSide(template.chiefSide),
       items: template.items

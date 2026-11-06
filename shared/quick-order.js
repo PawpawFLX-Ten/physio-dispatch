@@ -74,7 +74,18 @@ const NUM = "([0-9]+|[一二两三四五六七八九十]{1,3})"
 // 手法/方向/剂量跟在肌肉名后面也认得（「股四头按摩八分钟」），会回头补到刚加的那项上，
 // 后面没说的沿用上一项（「腘绳肌松解，比目鱼肌」——比目鱼肌也是松解）。
 export function parseQuickOrder(text, options = {}) {
-  const raw = String(text || "")
+  const original = String(text || "")
+  const omitted = []
+  // 否定目标不能落成新增任务。改动口令交给首页的整单预览，不在加项入口猜测。
+  const raw = original.replace(/(?:今天)?(?:不做|不要做|别做|跳过|去掉|删除)[^，,。；;]*(?=[，,。；;]|$)/g, (phrase) => {
+    omitted.push(phrase)
+    return " ".repeat(phrase.length)
+  })
+  const issues = /改成|改为|不对|不是|换成|移到|照上次|照旧|套用|不|别|取消|停止/.test(raw)
+    ? ["这句话含修改或复用指令，请用首页「吩咐」预览整张单"] : []
+  if (omitted.some((phrase) => !TARGET_ALIASES.some(([alias]) => phrase.includes(alias)) || /只做|但是|除了|或者|但/.test(phrase))) {
+    issues.push("否定范围不明确，请在首页吩咐中明确说去掉第几项，或重新输入要做的项目")
+  }
   const spans = []
   const staff = Array.isArray(options.staff) ? options.staff : []
   const equipment = Array.isArray(options.equipment) ? options.equipment : []
@@ -187,8 +198,16 @@ export function parseQuickOrder(text, options = {}) {
   let assignee = null
   const items = []
   let groupStart = 0
+  let lastTargetEnd = -1
+  let lastTargetWasWork = false
+  let globalAssignee = null
 
-  for (const token of tokens) {
+  for (const [tokenIndex, token] of tokens.entries()) {
+    // 「第一块按摩8分钟，然后松解第二块」的前置手法不能回头改第一块。
+    const nextTarget = tokens.slice(tokenIndex + 1).find((next) => next.kind === "target")
+    if (token.kind !== "target" && lastTargetEnd >= 0 && nextTarget &&
+      /[，,。；;]|然后|接着/.test(raw.slice(lastTargetEnd, token.start)) &&
+      !/[，,。；;]|然后|接着/.test(raw.slice(token.end, nextTarget.start))) groupStart = items.length
     if (token.kind === "target") {
       const target = targetById(token.value)
       if (!target) continue
@@ -197,7 +216,8 @@ export function parseQuickOrder(text, options = {}) {
         chief = { targetId: target.id, side: hasSides(target) && pendingSide !== "both" ? pendingSide : null }
       } else if (target.kind !== "site" || sticky.equipmentTypeId) {
         const sides = pendingSide === "both" ? ["left", "right"] : [pendingSide]
-        groupStart = items.length
+        const connector = raw.slice(lastTargetEnd, token.start).replace(/双侧|左|右/g, "")
+        if (!lastTargetWasWork || !/^[\s和与跟及、以及]*$/.test(connector)) groupStart = items.length
         for (const side of sides) {
           items.push({
             targetId: target.id,
@@ -209,11 +229,18 @@ export function parseQuickOrder(text, options = {}) {
           })
         }
       }
+      lastTargetWasWork = items.length > groupStart
+      lastTargetEnd = token.end
       // 说「左膝，股四头…」时左右会一直管到换了侧为止；「双侧」也持续生效。
     } else if (token.kind === "side") {
       pendingSide = token.value
     } else if (token.kind === "assignee") {
       assignee = token.value
+      if (!items.length) globalAssignee = token.value
+      else for (let i = groupStart; i < items.length; i++) {
+        items[i].assigneeId = token.value.id
+        items[i].assigneeName = token.value.name
+      }
     } else if (token.kind === "equipment") {
       sticky.technique = "equipment"
       sticky.equipmentTypeId = token.value.id
@@ -243,8 +270,19 @@ export function parseQuickOrder(text, options = {}) {
     }
   }
 
+  // 末尾只交代一次「给某人」沿用原来的整套派工约定；说了多个人则逐项保留。
+  if (tokens.at(-1)?.kind === "assignee" && tokens.filter((token) => token.kind === "assignee").length === 1) {
+    for (const item of items) {
+      item.assigneeId = assignee.id
+      item.assigneeName = assignee.name
+    }
+  }
   const equipmentById = new Map(equipmentRows.map((row) => [row.id, row]))
   for (const item of items) {
+    if (!item.assigneeId && globalAssignee) {
+      item.assigneeId = globalAssignee.id
+      item.assigneeName = globalAssignee.name
+    }
     if (!item.equipmentTypeId) continue
     const type = equipmentById.get(item.equipmentTypeId)
     const dose = item.dose || {}
@@ -266,12 +304,15 @@ export function parseQuickOrder(text, options = {}) {
     item.parameters = parameters
   }
 
+  const allAssignedTogether = assignee && items.every((item) => item.assigneeId === assignee.id)
   return {
     chief,
     items,
     unknown: leftoverWords(raw, tokens),
-    assigneeId: assignee?.id || null,
-    assigneeName: assignee?.name || "",
+    assigneeId: allAssignedTogether ? assignee.id : null,
+    assigneeName: allAssignedTogether ? assignee.name : assignee ? "分步派工" : "",
+    omitted,
+    issues,
   }
 }
 
@@ -313,8 +354,8 @@ function leftoverWords(raw, tokens) {
   for (const token of tokens) mask.fill("*", token.start, token.end)
   const chunks = mask
     .join("")
-    .split(/[^\u4e00-\u9fa5]+/)
-    .filter((word) => /[\u4e00-\u9fa5]/.test(word) && word.length >= 2 && !STOP_WORDS.has(word))
+    .split(/[^\u4e00-\u9fa5a-zA-Z0-9.]+/)
+    .filter((word) => (word.length >= 2 || /[a-zA-Z0-9一二两三四五六七八九十百千万半不勿停轻重慢快痛只]/.test(word)) && !STOP_WORDS.has(word))
   const unknown = []
   for (const word of chunks) {
     if (!unknown.includes(word)) unknown.push(word)

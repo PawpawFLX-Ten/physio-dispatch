@@ -7,6 +7,8 @@ import { viewMethods } from "./views.js"
 import { entryMethods } from "./entries.js"
 import { templateMethods } from "./templates.js"
 import { pairingMethods } from "./pairings.js"
+import { workflowMethods } from "./workflow.js"
+import { orderCommandMethods } from "./order-commands.js"
 
 export { todayKey } from "./helpers.js"
 
@@ -37,4 +39,4 @@ export class ClinicStore {
   }
 }
 
-Object.assign(ClinicStore.prototype, ioMethods, authMethods, viewMethods, entryMethods, templateMethods, pairingMethods)
+Object.assign(ClinicStore.prototype, ioMethods, authMethods, viewMethods, entryMethods, templateMethods, pairingMethods, workflowMethods, orderCommandMethods)
