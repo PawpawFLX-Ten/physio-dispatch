@@ -67,6 +67,7 @@ export class DurableClinicStore extends ClinicCore {
     this.sql.exec(`
       CREATE TABLE IF NOT EXISTS records (key TEXT PRIMARY KEY, json TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS runtime (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS login_attempts (key TEXT PRIMARY KEY, window INTEGER NOT NULL, count INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS backups (id TEXT PRIMARY KEY, created_at TEXT NOT NULL, kind TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS backup_chunks (backup_id TEXT NOT NULL, part INTEGER NOT NULL, json TEXT NOT NULL, PRIMARY KEY (backup_id, part));
       CREATE TABLE IF NOT EXISTS audit (id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, email TEXT NOT NULL, who TEXT NOT NULL, action TEXT NOT NULL, detail TEXT NOT NULL);
@@ -80,6 +81,24 @@ export class DurableClinicStore extends ClinicCore {
   }
 
   save() { this.dirty = true }
+
+  allowLoginAttempt(key, now = Date.now()) {
+    const window = Math.floor(now / (10 * 60 * 1000))
+    return this.storage.transactionSync(() => {
+      this.sql.exec("DELETE FROM login_attempts WHERE window < ?", window - 1)
+      const count = (name) => {
+        const row = this.sql.exec("SELECT window, count FROM login_attempts WHERE key = ?", name).toArray()[0]
+        return row?.window === window ? row.count : 0
+      }
+      const ipCount = count(`ip:${key}`)
+      const total = count("all")
+      if (ipCount >= 10 || total >= 100) return false
+      for (const [name, next] of [[`ip:${key}`, ipCount + 1], ["all", total + 1]]) {
+        this.sql.exec("INSERT INTO login_attempts (key, window, count) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET window = excluded.window, count = excluded.count", name, window, next)
+      }
+      return true
+    })
+  }
 
   audit(deviceId, action, detail = {}) {
     const who = this.state.staff.find((person) => person.id === this.device(deviceId))?.name || ""

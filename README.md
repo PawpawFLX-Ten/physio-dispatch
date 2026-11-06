@@ -5,7 +5,7 @@
 **每天用它干活的人看 [docs/治疗室使用说明.md](docs/治疗室使用说明.md)。**
 
 **完全 Cloudflare 托管（无需电脑常开）看 [docs/Cloudflare部署.md](docs/Cloudflare部署.md)。**
-云版目标站点为 `physio.pawpawmaster.com`：Worker + 静态资源 + SQLite Durable Object + Access，保留局域网版使用方式。云版数据保存在 Cloudflare，不适用下文局域网版“仅存本机”的数据说明；部署前必须配置 Access。
+云版目标站点为 `physio.pawpawmaster.com`：Worker + 静态资源 + SQLite Durable Object，保留局域网版使用方式。**当前按要求配置为公开演示，只允许虚构资料，无需邮箱或口令；页面有常驻提醒。** 共用口令和 Access 保护均可切回。云版数据保存在 Cloudflare，不适用下文局域网版“仅存本机”的数据说明；使用真实资料前必须切回保护模式。
 
 ## 少说、少点的工作流（2026-11）
 

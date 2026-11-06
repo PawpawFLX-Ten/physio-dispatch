@@ -183,6 +183,13 @@ export default function App() {
     return () => document.removeEventListener("visibilitychange", onVisible)
   }, [])
 
+  const demoNotice = snap?.authMode === "public-demo" ? (
+    <aside className="public-demo-banner" role="status">
+      <strong>公开演示 · 无登录保护</strong>
+      <span>仅限虚构数据，所有人均可查看和修改</span>
+    </aside>
+  ) : null
+
   if (error && !snap) {
     return (
       <main className="screen">
@@ -201,9 +208,11 @@ export default function App() {
     )
   }
   if (!snap) return <main className="screen"><p>正在打开治疗室…</p></main>
-  if (snap.stage !== "ready") return <Gate snap={snap} onChange={setSnap} />
+  if (snap.stage !== "ready") return <>{demoNotice}<Gate snap={snap} onChange={setSnap} /></>
   if (entryId) {
     return (
+      <>
+      {demoNotice}
       <Suspense fallback={<main className="screen"><p>正在打开病人页…</p></main>}>
         <PatientDay
           entryId={entryId}
@@ -219,10 +228,11 @@ export default function App() {
           }}
         />
       </Suspense>
+      </>
     )
   }
-  return <Today snap={snap} live={live} changedBy={changedBy} onRefresh={refresh} onSnap={applySnap} onOpen={(id, initial) => {
+  return <>{demoNotice}<Today snap={snap} live={live} changedBy={changedBy} onRefresh={refresh} onSnap={applySnap} onOpen={(id, initial) => {
     setEntryId(id)
     setEntryInitial(initial || null)
-  }} />
+  }} /></>
 }

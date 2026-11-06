@@ -9,6 +9,7 @@ import { verifyAccess } from "../cloudflare/access.js"
 import { checkOrigin, readJsonBody } from "../cloudflare/http.js"
 import { matchRoute } from "../cloudflare/routes.js"
 import { socketAuthorized } from "../cloudflare/sockets.js"
+import { authMode, authenticateRequest, loginWithPasscode, logoutResponse, passcodePage, SESSION_COOKIE } from "../cloudflare/auth.js"
 
 function storage(t) {
   const db = new DatabaseSync(":memory:")
@@ -133,4 +134,46 @@ test("休眠的 WebSocket 不能在 Access 令牌过期后继续接收业务通�
   assert.equal(socketAuthorized({ deserializeAttachment: () => ({ expiresAt: 2000 }) }, 1000), true)
   assert.equal(socketAuthorized({ deserializeAttachment: () => ({ expiresAt: 1000 }) }, 1000), false)
   assert.equal(socketAuthorized({ deserializeAttachment: () => null }, 1000), false)
+  const socket = { deserializeAttachment: () => ({ expiresAt: 2000, mode: "public-demo", generation: "public-demo-v1" }) }
+  assert.equal(socketAuthorized(socket, 1000, { mode: "passcode", generation: "private" }), false)
+  assert.equal(socketAuthorized(socket, 1000, { mode: "public-demo", generation: "public-demo-v1" }), true)
+})
+
+test("只有显式确认的公开演示可以无登录，缺省及拼错模式仍拒绝匿名访问", async () => {
+  const request = new Request("https://physio.pawpawmaster.com/")
+  assert.equal(authMode({}), "access")
+  assert.throws(() => authMode({ AUTH_MODE: "publc" }), { status: 503 })
+  await assert.rejects(authenticateRequest(request, { AUTH_MODE: "public-demo" }), { status: 503 })
+  const identity = await authenticateRequest(request, { AUTH_MODE: "public-demo", PUBLIC_DEMO_ACK: "fictional-data-only" })
+  assert.equal(identity.mode, "public-demo")
+  assert.equal(identity.email, "")
+  await assert.rejects(authenticateRequest(request, { AUTH_MODE: "access" }), { status: 503 })
+  await assert.rejects(authenticateRequest(request, { AUTH_MODE: "passcode" }), { status: 503 })
+})
+
+test("治疗室口令登录使用安全 Cookie、7 天会话，改口令后旧会话失效", async () => {
+  const env = { AUTH_MODE: "passcode", CLINIC_ID: "test-clinic", CLINIC_PASSCODE: "test-only-example-passcode-16-characters" }
+  const request = new Request("https://physio.pawpawmaster.com/")
+  const login = (value) => new Request("https://physio.pawpawmaster.com/_clinic/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ passcode: value }) })
+  await assert.rejects(authenticateRequest(request, env), { status: 401 })
+  await assert.rejects(loginWithPasscode(login("wrong"), env, async () => true), { status: 401 })
+  await assert.rejects(loginWithPasscode(login(env.CLINIC_PASSCODE), env, async () => false), { status: 429 })
+  const response = await loginWithPasscode(login(env.CLINIC_PASSCODE), env, async () => true)
+  const cookie = response.headers.get("set-cookie")
+  assert.match(cookie, /HttpOnly; Secure; SameSite=Strict; Max-Age=604800/)
+  assert.ok(cookie.startsWith(`${SESSION_COOKIE}=`))
+  const signed = new Request(request, { headers: { Cookie: cookie.split(";")[0] } })
+  assert.equal((await authenticateRequest(signed, env)).mode, "passcode")
+  await assert.rejects(authenticateRequest(signed, { ...env, CLINIC_PASSCODE: "another-test-only-example-passcode" }), { status: 401 })
+  assert.match(logoutResponse().headers.get("set-cookie"), /Max-Age=0/)
+  assert.equal(passcodePage(env).headers.get("cache-control"), "no-store")
+})
+
+test("口令防猜次数存在 SQLite，重启不重置，十分钟窗口结束后恢复", (t) => {
+  const { store, disk } = room(t)
+  const now = 1000000
+  for (let count = 0; count < 10; count += 1) assert.equal(store.allowLoginAttempt("test-ip", now), true)
+  assert.equal(store.allowLoginAttempt("test-ip", now), false)
+  assert.equal(new DurableClinicStore(disk).allowLoginAttempt("test-ip", now), false)
+  assert.equal(store.allowLoginAttempt("test-ip", now + 10 * 60 * 1000), true)
 })

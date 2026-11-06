@@ -92,7 +92,7 @@ export default [
   {
     files: ["cloudflare/**/*.js"],
     languageOptions: { ecmaVersion: 2024, sourceType: "module", globals: {
-      ...nodeGlobals, Request: "readonly", Response: "readonly", Headers: "readonly",
+      ...nodeGlobals, crypto: "readonly", Request: "readonly", Response: "readonly", Headers: "readonly",
       TextEncoder: "readonly", TextDecoder: "readonly", WebSocketPair: "readonly", WebSocketRequestResponsePair: "readonly",
     } },
   },

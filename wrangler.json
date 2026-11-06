@@ -17,6 +17,8 @@
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ClinicRoom"] }],
   "vars": {
     "CLINIC_ID": "pawpawmaster-physio-production",
+    "AUTH_MODE": "public-demo",
+    "PUBLIC_DEMO_ACK": "fictional-data-only",
     "ACCESS_TEAM_DOMAIN": "",
     "ACCESS_AUD": ""
   },

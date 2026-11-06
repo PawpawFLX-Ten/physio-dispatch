@@ -68,6 +68,7 @@ try {
   const port = await freePort()
   const base = `http://127.0.0.1:${port}`
 
+  config.vars.AUTH_MODE = "access"
   await start(config, port, 503)
   for (const route of ["/", "/body/knee.glb", "/api/session?deviceId=doc"]) {
     const response = await fetch(`${base}${route}`, { headers: { "cf-access-authenticated-user-email": "spoof@example.test" } })
@@ -76,7 +77,22 @@ try {
   await stop()
   console.log("1 生产默认拒绝访问，静态资源和 API 均不能绕过 Access：通过")
 
-  config.vars = { CLINIC_ID: "cloudflare-integration-test", LOCAL_DEVELOPMENT: "true" }
+  config.vars = { CLINIC_ID: "cloudflare-integration-test", AUTH_MODE: "passcode", CLINIC_PASSCODE: "test-only-passcode-do-not-use-in-production" }
+  await start(config, port, 401)
+  const loginPage = await fetch(`${base}/`, { redirect: "manual", headers: { Accept: "text/html" } })
+  if (loginPage.status !== 303 || loginPage.headers.get("location") !== "/_clinic/login") throw new Error("口令模式未跳转到自己的登录页")
+  const login = await fetch(`${base}/_clinic/login`, { method: "POST", headers: { "Content-Type": "application/json", Origin: base }, body: JSON.stringify({ passcode: config.vars.CLINIC_PASSCODE }) })
+  if (!login.ok) throw new Error(`口令登录失败：${await login.text()}`)
+  const cookie = login.headers.get("set-cookie")?.split(";")[0]
+  const authenticated = await fetch(`${base}/api/health`, { headers: { Cookie: cookie } })
+  if (!authenticated.ok || (await authenticated.json()).authMode !== "passcode") throw new Error("口令会话未被识别")
+  const loggedOut = await fetch(`${base}/_clinic/logout`, { method: "POST", headers: { "Content-Type": "application/json", Origin: base }, body: "{}" })
+  if (!loggedOut.headers.get("set-cookie")?.includes("Max-Age=0")) throw new Error("退出未清除 Cookie")
+  await stop()
+  console.log("1b 保留共用口令模式：自己的登录页、安全 Cookie、会话及退出：通过")
+
+  // 不使用 LOCAL_DEVELOPMENT，确保测试的是正式的公开演示开关，而非本地认证豁免。
+  config.vars = { CLINIC_ID: "cloudflare-integration-test", AUTH_MODE: "public-demo", PUBLIC_DEMO_ACK: "fictional-data-only" }
   await start(config, port)
   async function api(route, body, deviceId = "doc", method = "POST") {
     const response = await fetch(`${base}${route}${method === "GET" ? `${route.includes("?") ? "&" : "?"}deviceId=${deviceId}` : ""}`, {
@@ -90,6 +106,7 @@ try {
   const doc = await api("/api/setup", { staffName: "云端主治" })
   const aide = await api("/api/claim", { staffName: "云端助手" }, "aide")
   if (doc.hosting !== "cloudflare" || aide.hosting !== "cloudflare") throw new Error("云端视图缺少 hosting 标记")
+  if (doc.authMode !== "public-demo" || aide.authMode !== "public-demo") throw new Error("公开演示标记未传给前端")
   const created = await api("/api/patients", { name: "云端模拟患者", conditionName: "左膝" })
   const entryId = created.entry.id
   const input = { patientId: created.entry.patientId, text: "左膝，股四头肌和腘绳肌各松解5分钟，交给云端助手", sequential: true }
@@ -127,6 +144,7 @@ try {
     page.on("websocket", () => { webSockets += 1 })
     await page.goto(base)
     await page.getByRole("heading", { name: "今日单", exact: true }).waitFor()
+    await page.getByText("公开演示 · 无登录保护", { exact: true }).waitFor()
     return page
   }
   const doctorPage = await phone("doc")

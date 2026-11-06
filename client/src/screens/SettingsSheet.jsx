@@ -97,7 +97,12 @@ export function SettingsSheet({ snap, pending, error, run, onClose, onRefresh })
                   <>
                     <h3>{snap.hosting === "cloudflare" ? "本站地址" : "本机地址"}</h3>
                     <p className="muted">{clinicUrl}</p>
-                    <p className="muted">{snap.hosting === "cloudflare" ? "通过 Cloudflare Access 登录后使用。数据由 Cloudflare 保存，无需治疗室电脑常开。" : "同一 Wi‑Fi 的手机用这个地址打开（以终端打印的局域网 IP 为准）。"}</p>
+                    <p className="muted">{snap.hosting === "cloudflare" ? snap.authMode === "public-demo" ? "公开演示：无需邮箱或口令，所有访问者都可查看和修改。请勿输入真实患者资料。" : snap.authMode === "passcode" ? "治疗室共用口令登录，这台手机记住 7 天，不需要邮箱。" : "通过 Cloudflare Access 登录后使用。数据由 Cloudflare 保存，无需治疗室电脑常开。" : "同一 Wi‑Fi 的手机用这个地址打开（以终端打印的局域网 IP 为准）。"}</p>
+                    {snap.authMode === "passcode" ? <button type="button" className="secondary" disabled={pending} onClick={() => run(async () => {
+                      const response = await fetch("/_clinic/logout", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })
+                      if (!response.ok) throw new Error("退出失败，请稍后再试")
+                      window.location.assign("/_clinic/login")
+                    })}>退出治疗室口令登录</button> : null}
                   </>
                 ) : null}
                 <h3>任务提醒</h3>

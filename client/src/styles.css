@@ -110,3 +110,14 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .workflow-check input { flex: none; width: 22px; height: 22px; accent-color: var(--accent); }
 .instruction-editor { display: grid; gap: 12px; padding: 12px 0; margin-bottom: 16px; border-bottom: 1px solid var(--line); }
 .instruction-editor h3, .instruction-editor p { margin: 0; }
+
+.public-demo-banner {
+  height: 60px; display: flex; flex-direction: column; justify-content: center;
+  padding: 6px 16px; font-size: 14px; line-height: 21px;
+  background: var(--danger-bg); color: var(--danger); border-bottom: 1px solid var(--danger);
+}
+.public-demo-banner + .screen { min-height: calc(100vh - 60px); }
+.public-demo-banner + .today.screen, .public-demo-banner + .patient-day {
+  height: calc(100vh - 60px); height: calc(100dvh - 60px);
+  max-height: calc(100vh - 60px); max-height: calc(100dvh - 60px);
+}
