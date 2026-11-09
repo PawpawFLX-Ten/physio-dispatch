@@ -12,6 +12,7 @@ import { NodeIO } from "@gltf-transform/core"
 import { EXTMeshoptCompression, KHRMeshQuantization } from "@gltf-transform/extensions"
 import { meshopt } from "@gltf-transform/functions"
 import { MeshoptEncoder } from "meshoptimizer"
+import { BODY_FILES } from "../shared/body-map.js"
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const bodyDir = path.join(root, "client", "public", "body")
@@ -97,6 +98,12 @@ for (const name of files) {
 
 // 模型内容变了，版本号跟着变，浏览器才会扔掉旧缓存。
 const stamp = new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 12)
-fs.writeFileSync(versionFile, `// 由 npm run optimize:body 生成，模型一换这里就变。\nexport const BODY_VERSION = "${stamp}"\n`)
+// 只算页面真正会加载的那些文件，加载进度的分母才准。
+const bodyBytes = BODY_FILES.reduce((sum, name) => sum + fs.statSync(path.join(bodyDir, name)).size, 0)
+fs.writeFileSync(
+  versionFile,
+  `// 由 npm run optimize:body 生成，模型一换这里就变。\nexport const BODY_VERSION = "${stamp}"\n` +
+    `// 页面要加载的全部模型文件合计字节数，加载时显示「已下载 x / 共 y MB」。\nexport const BODY_BYTES = ${bodyBytes}\n`,
+)
 console.log(`shared/body-assets.js 版本号 ${stamp}`)
 console.log(`合计 ${Math.round(beforeBytes / 1024)}KB -> ${Math.round(afterBytes / 1024)}KB`)

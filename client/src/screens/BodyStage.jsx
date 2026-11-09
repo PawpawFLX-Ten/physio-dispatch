@@ -22,7 +22,8 @@ import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js
 import { CSS2DObject, CSS2DRenderer } from "three/examples/jsm/renderers/CSS2DRenderer.js"
 import { hasSides, targetById, TARGETS } from "@shared/catalog.js"
 import { BODY_CAMERA, BODY_FILES, meshSlug, OCCLUDED_TARGETS, resolveMesh } from "@shared/body-map.js"
-import { BODY_VERSION } from "@shared/body-assets.js"
+import { BODY_BYTES, BODY_VERSION } from "@shared/body-assets.js"
+import { createLimiter, downloadBytes } from "@shared/body-download.js"
 import { chooseBodyHit } from "@shared/body-pick.js"
 import {
   buildMarkState,
@@ -52,15 +53,49 @@ const sharedLoader = new GLTFLoader()
 // 模型用 meshopt + 量化（KHR_mesh_quantization）压的：解码器是纯 JS 随包走，
 // 不用再下 draco 的 wasm，低端机解码也快得多。
 sharedLoader.setMeshoptDecoder(MeshoptDecoder)
+// 字节自己下（卡死会断开重下，GLTFLoader 自带的下载做不到），下完再交给 GLTFLoader 解析。
+// 同时最多下 4 个，其余排队。
+const downloadSlot = createLimiter(4)
+// 下载进度也放模块级：下载跨挂载继续跑，离开病人页再回来，进度接着显示。
+const downloadState = new Map()
+const downloadListeners = new Set()
+
+function reportDownload(file, patch) {
+  if (patch) downloadState.set(file, { ...downloadState.get(file), ...patch })
+  else downloadState.delete(file)
+  for (const listener of downloadListeners) listener()
+}
+
+function downloadSnapshot() {
+  let received = 0
+  let retrying = false
+  for (const state of downloadState.values()) {
+    received += state.received || 0
+    if (state.retrying && !state.done) retrying = true
+  }
+  return { received, retrying }
+}
 
 function loadBodyFile(file) {
   const hit = gltfCache.get(file)
   if (hit) return hit
-  const pending = sharedLoader.loadAsync(`/body/${file}?v=${BODY_VERSION}`).catch((err) => {
-    // 失败不留在缓存里，下次挂载还能重试。
-    gltfCache.delete(file)
-    throw err
-  })
+  const pending = downloadSlot(() =>
+    downloadBytes(`/body/${file}?v=${BODY_VERSION}`, {
+      onProgress: (received) => reportDownload(file, { received }),
+      // 重下从头开始，已收的字节不算数。
+      onRetry: () => reportDownload(file, { received: 0, retrying: true }),
+    }),
+  )
+    .then((buffer) => {
+      reportDownload(file, { done: true })
+      return sharedLoader.parseAsync(buffer, "/body/")
+    })
+    .catch((err) => {
+      // 失败不留在缓存里，下次挂载还能重试。
+      gltfCache.delete(file)
+      reportDownload(file, null)
+      throw err
+    })
   gltfCache.set(file, pending)
   return pending
 }
@@ -101,6 +136,10 @@ function roundPoint(vector) {
   }
 }
 
+function megabytes(bytes) {
+  return (bytes / 1048576).toFixed(1)
+}
+
 export function BodyStage({ chiefSiteId, chiefSide, items, reselecting, onSelect }) {
   const viewRef = useRef(null)
   const propsRef = useRef({ chiefSiteId, chiefSide, items, onSelect })
@@ -109,6 +148,7 @@ export function BodyStage({ chiefSiteId, chiefSide, items, reselecting, onSelect
   const zoomRef = useRef(null)
   const [phase, setPhase] = useState("loading")
   const [progress, setProgress] = useState(0)
+  const [download, setDownload] = useState(downloadSnapshot)
   // 加载失败后整段初始化重来一遍的计数器（挂进大 effect 的依赖）。
   const [attempt, setAttempt] = useState(0)
 
@@ -797,6 +837,21 @@ export function BodyStage({ chiefSiteId, chiefSide, items, reselecting, onSelect
         }
       }
       tick()
+      // 下载进度 0.2 秒刷一次：快网上每个数据块都 setState 太频繁。
+      let downloadTimer = 0
+      const syncDownload = () => {
+        if (downloadTimer) return
+        downloadTimer = window.setTimeout(() => {
+          downloadTimer = 0
+          if (mounted) setDownload(downloadSnapshot())
+        }, 200)
+      }
+      downloadListeners.add(syncDownload)
+      unlisten.push(() => {
+        downloadListeners.delete(syncDownload)
+        window.clearTimeout(downloadTimer)
+      })
+      syncDownload()
       loadBody(figure).catch((err) => {
         // 加载失败的具体原因挂到节点上：真机上没法开 devtools，还能从 dataset 里看出来。
         try {
@@ -836,7 +891,20 @@ export function BodyStage({ chiefSiteId, chiefSide, items, reselecting, onSelect
         <p className="body-stage-credit">BodyParts3D，© Database Center for Life Science，CC BY 4.0</p>
       ) : null}
       {phase === "loading" ? (
-        <p className="body-stage-fail">{`正在加载人体 ${progress}/${BODY_FILES.length}`}</p>
+        <p className="body-stage-fail">
+          <span>
+            {`正在加载人体 ${progress}/${BODY_FILES.length}`}
+            {download.received > 0 || download.retrying ? (
+              <>
+                <br />
+                <small>
+                  {`已下载 ${megabytes(download.received)} / ${megabytes(BODY_BYTES)} MB`}
+                  {download.retrying ? " · 网络较慢，正在自动重试" : ""}
+                </small>
+              </>
+            ) : null}
+          </span>
+        </p>
       ) : null}
       {phase === "failed" ? (
         <>
