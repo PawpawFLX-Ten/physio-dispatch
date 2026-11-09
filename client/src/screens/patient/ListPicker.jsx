@@ -76,7 +76,7 @@ export function ListPicker({
           // 新单还没定主诉时才自动弹键盘（说一句是主路）；已定主诉的加项走搭配芯片更快，
           // 键盘别把它们挡住，要说一句点一下输入框就行。
           autoFocus={needSite}
-          placeholder="说一句：左膝 股四头按摩8分钟 然后腘绳肌松解"
+          placeholder="说一句，如：左膝 股四头按摩8分钟"
           aria-label="说一句加项"
           enterKeyHint="done"
           autoComplete="off"

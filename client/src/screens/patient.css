@@ -412,18 +412,37 @@
 
 .patient-sheet {
   width: 100%;
+  /* 平板/桌面浏览器上演示时别拉满整屏宽；手机宽度不受影响。 */
+  max-width: 640px;
+  margin: 0 auto;
   max-height: min(78%, 640px);
+  /* 手机浏览器地址栏收放时 % 会跳，dvh 才是稳定的可视高度。 */
+  max-height: min(76dvh, 620px);
   overflow: auto;
   overscroll-behavior: contain;
   background: var(--bg);
   border-radius: 22px 22px 0 0;
-  padding: 8px 16px calc(16px + env(safe-area-inset-bottom));
+  padding: 8px 16px calc(24px + env(safe-area-inset-bottom));
   box-shadow: 0 -8px 30px rgba(28, 25, 21, 0.12);
 }
 
+/* 滚到一半时底部生硬截断：贴着可视区底边的渐变盖住折口，暗示还能滚。
+   注意不能用 absolute——那会贴到两千多像素的内容底端跟着滚走，贴不住可视边。 */
+.patient-sheet::after {
+  content: "";
+  display: block;
+  position: sticky;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 28px;
+  pointer-events: none;
+  background: linear-gradient(transparent, var(--bg) 78%);
+}
+
 .patient-sheet h2 {
-  margin: 4px 0 16px;
-  font-size: 24px;
+  margin: 2px 0 12px;
+  font-size: 20px;
   line-height: 1.3;
   font-weight: 600;
 }
@@ -437,13 +456,13 @@
   height: 4px;
   border-radius: 99px;
   background: #d9d0c0;
-  margin: 6px auto 8px;
+  margin: 4px auto 6px;
 }
 
 .patient-label {
   margin: 0 0 8px;
   color: var(--muted);
-  font-size: 18px;
+  font-size: 16px;
 }
 
 .patient-stack {
@@ -559,7 +578,7 @@
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
   gap: 8px;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 }
 
 .patient-grid .patient-choice {
